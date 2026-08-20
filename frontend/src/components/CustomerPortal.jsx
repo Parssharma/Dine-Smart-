@@ -9,7 +9,14 @@ const API_BASE = 'http://localhost:5000/api';
 
 export default function CustomerPortal() {
   const { user, isAuthenticated, login, register, getAuthHeaders } = useAuth();
-  const todayStr = new Date().toISOString().split('T')[0];
+  
+  const getLocalTodayStr = () => {
+    const now = new Date();
+    const offset = now.getTimezoneOffset();
+    const localNow = new Date(now.getTime() - (offset * 60 * 1000));
+    return localNow.toISOString().split('T')[0];
+  };
+  const todayStr = getLocalTodayStr();
 
   // Tab View within customer portal: 'reserve' | 'my-bookings'
   const [activeCustomerTab, setActiveCustomerTab] = useState('reserve');
@@ -35,11 +42,12 @@ export default function CustomerPortal() {
   // Search & Results State
   const [searching, setSearching] = useState(false);
   const [recommendations, setRecommendations] = useState([]);
+  const [combination, setCombination] = useState(null);
   const [selectedTable, setSelectedTable] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
   
   // Booking Outcomes
-  const [bookingSuccess, setBookingSuccess] = useState(null); // { type: 'booking' | 'waitlist', data: ..., position?: number }
+  const [bookingSuccess, setBookingSuccess] = useState(null); // { type: 'booking' | 'waitlist', data: ..., position?: number, combinedTableNames?: string, combinedTables?: array }
   const [errorMsg, setErrorMsg] = useState('');
   const [confirming, setConfirming] = useState(false);
 
@@ -130,38 +138,61 @@ export default function CustomerPortal() {
     }
   };
 
-  // Periodically refresh recommendations in real-time if a search is active
+  // Periodically refresh recommendations & combinations in real-time if a search is active and not completed
   useEffect(() => {
-    if (!hasSearched || recommendations.length === 0) return;
+    if (!hasSearched || bookingSuccess) return;
 
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/dsa/recommend`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            partySize: parseInt(partySize, 10), 
-            preference,
-            bookingDate,
-            startTime,
-            endTime
+        const searchPayload = {
+          partySize: parseInt(partySize, 10), 
+          preference,
+          bookingDate,
+          startTime,
+          endTime
+        };
+
+        const [recRes, combRes] = await Promise.all([
+          fetch(`${API_BASE}/dsa/recommend`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(searchPayload)
+          }),
+          fetch(`${API_BASE}/dsa/combine`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(searchPayload)
           })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          setRecommendations(data);
+        ]);
+
+        if (recRes.ok) {
+          const data = await recRes.json();
+          if (Array.isArray(data)) setRecommendations(data);
+        }
+        if (combRes.ok) {
+          const combData = await combRes.json();
+          if (combData && Array.isArray(combData.combination) && combData.combination.length > 0) {
+            setCombination(combData);
+          } else {
+            setCombination(null);
+          }
         }
       } catch (err) {
         console.error('Silent recommendations refresh failed:', err);
       }
-    }, 3000);
+    }, 4000);
 
     return () => clearInterval(interval);
-  }, [hasSearched, recommendations.length, partySize, preference, bookingDate, startTime, endTime]);
+  }, [hasSearched, bookingSuccess, partySize, preference, bookingDate, startTime, endTime]);
 
-  // Handle Table Search (Recommendations)
+  // Initial search on mount
+  useEffect(() => {
+    handleSearch();
+  }, []);
+
+  // Handle Table Search (Recommendations + Combinations)
   const handleSearch = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!partySize || parseInt(partySize, 10) <= 0) return;
 
     if (startTime >= endTime) {
@@ -174,23 +205,43 @@ export default function CustomerPortal() {
     setErrorMsg('');
     setBookingSuccess(null);
     setSelectedTable(null);
+    setCombination(null);
 
     try {
-      const res = await fetch(`${API_BASE}/dsa/recommend`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          partySize: parseInt(partySize, 10), 
-          preference,
-          bookingDate,
-          startTime,
-          endTime
+      const searchPayload = { 
+        partySize: parseInt(partySize, 10), 
+        preference,
+        bookingDate,
+        startTime,
+        endTime
+      };
+
+      const [recRes, combRes] = await Promise.all([
+        fetch(`${API_BASE}/dsa/recommend`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(searchPayload)
+        }),
+        fetch(`${API_BASE}/dsa/combine`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(searchPayload)
         })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to search tables');
-      
-      setRecommendations(data);
+      ]);
+
+      const recData = await recRes.json();
+      const combData = combRes.ok ? await combRes.json() : null;
+
+      if (!recRes.ok && !combRes.ok) {
+        throw new Error(recData.message || 'Failed to search tables');
+      }
+
+      setRecommendations(Array.isArray(recData) ? recData : []);
+      if (combData && Array.isArray(combData.combination) && combData.combination.length > 0) {
+        setCombination(combData);
+      } else {
+        setCombination(null);
+      }
       setHasSearched(true);
     } catch (err) {
       setErrorMsg(err.message);
@@ -224,11 +275,13 @@ export default function CustomerPortal() {
     setConfirming(true);
 
     try {
+      const isComb = selectedTable?.isCombination;
       const payload = {
         customerName,
         contact,
         partySize: parseInt(partySize, 10),
-        tableId: selectedTable ? selectedTable.id : null,
+        tableId: selectedTable && !isComb ? (selectedTable._id || selectedTable.id) : null,
+        tableIds: isComb ? selectedTable.tables.map(t => t._id || t.id) : undefined,
         bookingDate,
         startTime,
         endTime
@@ -245,7 +298,10 @@ export default function CustomerPortal() {
       setBookingSuccess({
         type: data.type,
         data: data.data,
-        position: data.position
+        position: data.position,
+        combinedTableNames: data.combinedTableNames,
+        combinedTables: data.combinedTables,
+        totalCapacity: data.totalCapacity
       });
 
       if (!isAuthenticated) {
@@ -253,7 +309,9 @@ export default function CustomerPortal() {
       }
       setContact('');
       setRecommendations([]);
+      setCombination(null);
       setSelectedTable(null);
+      setHasSearched(false);
     } catch (err) {
       setErrorMsg(err.message);
     } finally {
@@ -627,13 +685,14 @@ export default function CustomerPortal() {
                   {recommendations.map((rec, idx) => {
                     const maxPossible = 10.0 + 5.0 + (preference ? 5.0 : 0.0);
                     const matchPercentage = Math.min(100, Math.round((rec.score / maxPossible) * 100));
+                    const isSelected = selectedTable && !selectedTable.isCombination && selectedTable.id === rec.id;
 
                     return (
                       <div 
                         key={rec.id} 
-                        className={`rec-card ${selectedTable?.id === rec.id ? 'selected' : ''}`}
-                        onClick={() => setSelectedTable(selectedTable?.id === rec.id ? null : rec)}
-                        style={{ cursor: 'pointer', border: selectedTable?.id === rec.id ? '1px solid var(--accent-gold)' : '1px solid var(--border-color)', position: 'relative' }}
+                        className={`rec-card ${isSelected ? 'selected' : ''}`}
+                        onClick={() => setSelectedTable(isSelected ? null : rec)}
+                        style={{ cursor: 'pointer', border: isSelected ? '1px solid var(--accent-gold)' : '1px solid var(--border-color)', position: 'relative' }}
                       >
                         {idx === 0 && (
                           <span style={{ position: 'absolute', top: '-10px', left: '12px', fontSize: '0.7rem', padding: '0.1rem 0.4rem', backgroundColor: 'var(--accent-gold)', borderRadius: 'var(--radius-sm)', fontWeight: 600, letterSpacing: '0.05em' }}>
@@ -663,16 +722,123 @@ export default function CustomerPortal() {
               </div>
             )}
 
-            {recommendations.length === 0 && !searching && (
-              <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)' }}>
-                {hasSearched ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-                    <AlertTriangle size={24} style={{ color: 'var(--status-waitlist)' }} />
-                    <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>No matching tables available</span>
-                    <span style={{ fontSize: '0.9rem' }}>
-                      All tables matching this capacity are occupied.
-                      Please use the form on the right to join the waiting list!
-                    </span>
+            {/* Backtracking Multi-Table Combinations */}
+            {combination && Array.isArray(combination.combination) && combination.combination.length > 0 && (
+              <div style={{ marginTop: recommendations.length > 0 ? '1.5rem' : '0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, color: 'var(--accent-gold)' }}>
+                    <Sparkles size={18} style={{ color: 'var(--accent-gold)' }} />
+                    Smart Table Combination
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>C++ Backtracking Engine</span>
+                </div>
+
+                <div style={{ padding: '0.6rem 0.85rem', backgroundColor: 'rgba(217, 119, 6, 0.08)', border: '1px solid rgba(217, 119, 6, 0.25)', borderRadius: 'var(--radius-sm)', marginBottom: '0.75rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                  {recommendations.length === 0 ? (
+                    <span>No single table can seat <strong>{partySize} guests</strong>. Our backtracking algorithm computed the optimal joined table combination:</span>
+                  ) : (
+                    <span>For larger parties, you can also select this optimal combined seating:</span>
+                  )}
+                </div>
+
+                <div 
+                  className={`rec-card ${selectedTable?.isCombination ? 'selected' : ''}`}
+                  onClick={() => {
+                    if (selectedTable?.isCombination) {
+                      setSelectedTable(null);
+                    } else {
+                      setSelectedTable({
+                        isCombination: true,
+                        id: `comb-${combination.combination.map(t => t._id).join('-')}`,
+                        number: combination.combination.map(t => t.number || t._id.slice(-4)).join(' + '),
+                        tables: combination.combination,
+                        totalCapacity: combination.totalCapacity
+                      });
+                    }
+                  }}
+                  style={{ 
+                    cursor: 'pointer', 
+                    border: selectedTable?.isCombination ? '2px solid var(--accent-gold)' : '1px solid rgba(217, 119, 6, 0.4)', 
+                    position: 'relative',
+                    background: selectedTable?.isCombination ? 'rgba(217, 119, 6, 0.12)' : 'var(--bg-tertiary)',
+                    boxShadow: selectedTable?.isCombination ? '0 0 15px var(--accent-gold-glow)' : 'none',
+                    padding: '1.2rem',
+                    borderRadius: 'var(--radius-md)',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <span style={{ position: 'absolute', top: '-10px', left: '12px', fontSize: '0.7rem', padding: '0.1rem 0.5rem', backgroundColor: 'var(--accent-gold)', color: '#000', borderRadius: 'var(--radius-sm)', fontWeight: 700, letterSpacing: '0.05em' }}>
+                    {selectedTable?.isCombination ? 'SELECTED COMBINATION' : 'OPTIMAL COMBINATION'}
+                  </span>
+
+                  <div className="rec-info" style={{ width: '100%' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <h4 style={{ fontSize: '1.15rem', color: 'var(--text-primary)', margin: 0 }}>
+                        {combination.combination.map(t => `Table T-${t.number}`).join(' + ')}
+                      </h4>
+                      <span className="rec-match-pill" style={{ backgroundColor: 'var(--status-free-glow)', color: 'var(--status-free)', fontWeight: 600 }}>
+                        {combination.totalCapacity} Total Seats (Exact Fit)
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                      {combination.combination.map((t, i) => (
+                        <span key={i} style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem', backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <strong style={{ color: 'var(--accent-gold)' }}>Table T-{t.number}</strong> ({t.capacity} seats • {t.location} • ★ {t.rating})
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
+                  * Click the combination card above to reserve all joined tables for your party of {partySize}.
+                </p>
+              </div>
+            )}
+
+            {recommendations.length === 0 && (!combination || !combination.combination || combination.combination.length === 0) && !searching && (
+              <div style={{ textAlign: 'center', padding: '1.5rem 0', color: 'var(--text-muted)' }}>
+                {bookingSuccess ? (
+                  <div style={{ textAlign: 'center', padding: '2rem 1.25rem', backgroundColor: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: 'var(--radius-md)' }}>
+                    <CheckCircle size={32} style={{ color: 'var(--status-free)', margin: '0 auto 0.75rem' }} />
+                    <h4 style={{ color: 'var(--text-primary)', margin: '0 0 0.5rem', fontWeight: 600 }}>Table Reserved Successfully!</h4>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                      Your reservation confirmation details are displayed on the right. If you wish to make an additional booking for another date or time, adjust the search options above and click <strong>Search Available Tables</strong>.
+                    </p>
+                  </div>
+                ) : hasSearched ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                    <AlertTriangle size={26} style={{ color: 'var(--status-waitlist)' }} />
+                    <div>
+                      <h4 style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '1rem', margin: 0 }}>No tables available for this time slot ({startTime} – {endTime})</h4>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem', maxWidth: '400px' }}>
+                        All tables for {partySize} guests are booked for this time. Try selecting an alternative time slot below or join the waiting list:
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center', marginTop: '0.25rem' }}>
+                      {[
+                        { label: '12:00 PM', s: '12:00', e: '13:30' },
+                        { label: '14:00 PM', s: '14:00', e: '15:30' },
+                        { label: '17:00 PM', s: '17:00', e: '18:30' },
+                        { label: '19:00 PM', s: '19:00', e: '20:30' },
+                        { label: '21:00 PM', s: '21:00', e: '22:30' }
+                      ].filter(slot => slot.s !== startTime).map((slot, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          className="btn-secondary"
+                          style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem' }}
+                          onClick={() => {
+                            setStartTime(slot.s);
+                            setEndTime(slot.e);
+                            setTimeout(() => handleSearch(), 50);
+                          }}
+                        >
+                          Try {slot.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   "Enter party size and search to see the best algorithmic table recommendations."
@@ -681,116 +847,255 @@ export default function CustomerPortal() {
             )}
           </div>
 
-          {/* Booking Form Panel */}
+          {/* Booking Form / Confirmation Panel */}
           <div className="panel-card">
             <h2 className="panel-title">
               <Clock size={22} className="logo-icon" />
-              Reserve or Join Waiting List
+              {bookingSuccess ? (bookingSuccess.type === 'booking' ? 'Reservation Confirmed' : 'Waiting List Status') : 'Reserve or Join Waiting List'}
             </h2>
 
-            {bookingSuccess && (
+            {bookingSuccess ? (
               <div>
                 {bookingSuccess.type === 'booking' ? (
-                  <div className="alert-banner">
-                    <CheckCircle size={24} />
-                    <div>
-                      <h4 style={{ fontWeight: 600 }}>Booking Confirmed!</h4>
-                      <p style={{ fontSize: '0.9rem', marginTop: '0.25rem' }}>
-                        Welcome <strong>{bookingSuccess.data.customerName}</strong>! Your table is confirmed at <strong>Table T-{bookingSuccess.data.tableId?.number || 'Auto-Assigned'}</strong> on <strong>{bookingSuccess.data.bookingDate}</strong> from <strong>{bookingSuccess.data.startTime} to {bookingSuccess.data.endTime}</strong>.
-                      </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    <div className="alert-banner" style={{ borderLeft: '4px solid var(--status-free)' }}>
+                      <CheckCircle size={28} style={{ color: 'var(--status-free)' }} />
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--status-free)', margin: 0 }}>
+                          Booking Confirmed!
+                        </h4>
+                        <p style={{ fontSize: '0.9rem', marginTop: '0.35rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                          Welcome <strong>{bookingSuccess.data.customerName}</strong>! Your dining reservation is secured.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '1.25rem', backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-gold)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.75rem' }}>
+                        Reservation Summary
+                      </span>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.95rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Reserved Table(s):</span>
+                          <strong style={{ color: 'var(--accent-gold)' }}>
+                            {bookingSuccess.combinedTableNames || (bookingSuccess.data.tableId?.number ? `Table T-${bookingSuccess.data.tableId.number}` : 'Auto-Assigned')}
+                          </strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Date:</span>
+                          <strong>{bookingSuccess.data.bookingDate}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Time Window:</span>
+                          <strong>{bookingSuccess.data.startTime} – {bookingSuccess.data.endTime}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Party Size:</span>
+                          <strong>{bookingSuccess.data.partySize} guests</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Status:</span>
+                          <span className="status-badge confirmed" style={{ fontSize: '0.75rem' }}>Confirmed</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                      * Please arrive within 15 minutes of your reserved time. Notifications and updates will appear in your notification centre.
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.5rem' }}>
+                      <button 
+                        onClick={() => {
+                          setBookingSuccess(null);
+                          setSelectedTable(null);
+                          setRecommendations([]);
+                          setCombination(null);
+                          setHasSearched(false);
+                          handleSearch();
+                        }}
+                        className="btn-primary"
+                        style={{ padding: '0.65rem 1.25rem' }}
+                      >
+                        Book Another Table
+                      </button>
+
+                      {isAuthenticated ? (
+                        <button 
+                          onClick={() => setActiveCustomerTab('my-bookings')}
+                          className="btn-secondary"
+                          style={{ padding: '0.65rem 1.25rem' }}
+                        >
+                          View in My Reservations
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => { setShowAuthModal(true); setAuthError(''); }}
+                          className="btn-secondary"
+                          style={{ padding: '0.65rem 1.25rem', fontSize: '0.85rem' }}
+                        >
+                          Sign In / Register to Track Online
+                        </button>
+                      )}
                     </div>
                   </div>
                 ) : (
-                  <div className="alert-banner warning">
-                    <AlertTriangle size={24} />
-                    <div style={{ flex: 1 }}>
-                      <h4 style={{ fontWeight: 600 }}>Tables Full — Added to Waiting List</h4>
-                      <p style={{ fontSize: '0.9rem', marginTop: '0.25rem' }}>
-                        Position: <strong>#{bookingSuccess.position}</strong> in waiting line for <strong>{bookingSuccess.data.bookingDate} ({bookingSuccess.data.startTime} - {bookingSuccess.data.endTime})</strong>.
-                      </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    <div className="alert-banner warning" style={{ borderLeft: '4px solid var(--status-waitlist)' }}>
+                      <AlertTriangle size={28} style={{ color: 'var(--status-waitlist)' }} />
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--status-waitlist)', margin: 0 }}>
+                          Tables Full — Added to Waiting List
+                        </h4>
+                        <p style={{ fontSize: '0.9rem', marginTop: '0.35rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                          You are currently <strong>#{bookingSuccess.position}</strong> in the live waiting queue.
+                        </p>
+                      </div>
                     </div>
-                    <button 
-                      onClick={checkWaitlistPosition} 
-                      className="btn-secondary" 
-                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', borderRadius: 'var(--radius-sm)' }}
-                    >
-                      Refresh Position
-                    </button>
+
+                    <div style={{ padding: '1.25rem', backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-gold)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.75rem' }}>
+                        Waitlist Details
+                      </span>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.95rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Requested Date:</span>
+                          <strong>{bookingSuccess.data.bookingDate}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Requested Time:</span>
+                          <strong>{bookingSuccess.data.startTime} – {bookingSuccess.data.endTime}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Party Size:</span>
+                          <strong>{bookingSuccess.data.partySize} guests</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Queue Position:</span>
+                          <span className="status-badge waitlist" style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                            #{bookingSuccess.position}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                      * The system continuously checks table availability. You will be automatically notified as soon as a table becomes available.
+                    </p>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                      <button 
+                        onClick={checkWaitlistPosition} 
+                        className="btn-secondary" 
+                        style={{ flex: 1, padding: '0.65rem 1rem' }}
+                      >
+                        Refresh Queue Position
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setBookingSuccess(null);
+                          setSelectedTable(null);
+                          setRecommendations([]);
+                          setCombination(null);
+                          setHasSearched(false);
+                          handleSearch();
+                        }}
+                        className="btn-primary"
+                        style={{ flex: 1, padding: '0.65rem 1rem' }}
+                      >
+                        Search Other Times
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
-            )}
-
-            {errorMsg && (
-              <div className="alert-banner" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: 'var(--status-occupied)' }}>
-                <AlertTriangle size={20} />
-                <div>
-                  <h4 style={{ fontWeight: 600 }}>Error</h4>
-                  <p style={{ fontSize: '0.9rem' }}>{errorMsg}</p>
-                </div>
-              </div>
-            )}
-
-            <form onSubmit={handleBooking}>
-              <div className="form-group">
-                <label className="form-label">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <User size={16} /> Customer Name
-                  </span>
-                </label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="e.g. Eleanor Vance" 
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Phone size={16} /> Contact Details
-                  </span>
-                </label>
-                <input 
-                  type="tel" 
-                  className="form-input" 
-                  placeholder="e.g. 5550199123" 
-                  value={contact}
-                  onChange={(e) => setContact(e.target.value)}
-                  pattern="^\d{10}$"
-                  title="Please enter a valid 10-digit phone number (digits only)"
-                  required
-                />
-              </div>
-
-              <div style={{ marginTop: '1.5rem', padding: '1rem', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(255,255,255,0.01)' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>
-                  RESERVATION CONFIGURATION
-                </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.95rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Guests: <strong>{partySize}</strong></span>
-                    <span>Date: <strong>{bookingDate}</strong></span>
+            ) : (
+              <div>
+                {errorMsg && (
+                  <div className="alert-banner" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: 'var(--status-occupied)', marginBottom: '1rem' }}>
+                    <AlertTriangle size={20} />
+                    <div>
+                      <h4 style={{ fontWeight: 600 }}>Error</h4>
+                      <p style={{ fontSize: '0.9rem' }}>{errorMsg}</p>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Time: <strong>{startTime} – {endTime}</strong></span>
-                    <span>Table: <strong>{selectedTable ? `Table T-${selectedTable.number || selectedTable.id.substring(selectedTable.id.length - 4).toUpperCase()}` : 'None (Auto/Waitlist)'}</strong></span>
-                  </div>
-                </div>
-              </div>
+                )}
 
-              <button 
-                type="submit" 
-                className="btn-primary" 
-                disabled={confirming}
-                style={{ marginTop: '1.5rem', backgroundColor: selectedTable ? 'var(--status-free)' : 'var(--accent-gold)', opacity: confirming ? 0.7 : 1 }}
-              >
-                {confirming ? 'Confirming booking...' : (selectedTable ? 'Confirm Selected Table' : 'Request Table / Join Waitlist')}
-              </button>
-            </form>
+                <form onSubmit={handleBooking}>
+                  <div className="form-group">
+                    <label className="form-label">
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <User size={16} /> Customer Name
+                      </span>
+                    </label>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      placeholder="e.g. Eleanor Vance" 
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Phone size={16} /> Contact Details
+                      </span>
+                    </label>
+                    <input 
+                      type="tel" 
+                      className="form-input" 
+                      placeholder="e.g. 5550199123" 
+                      value={contact}
+                      onChange={(e) => setContact(e.target.value)}
+                      pattern="^\d{10}$"
+                      title="Please enter a valid 10-digit phone number (digits only)"
+                      required
+                    />
+                  </div>
+
+                  <div style={{ marginTop: '1.5rem', padding: '1rem', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(255,255,255,0.01)' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>
+                      RESERVATION CONFIGURATION
+                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.95rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Guests: <strong>{partySize}</strong></span>
+                        <span>Date: <strong>{bookingDate}</strong></span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Time: <strong>{startTime} – {endTime}</strong></span>
+                        <span>Table: <strong>{
+                          selectedTable 
+                            ? (selectedTable.isCombination 
+                                ? `Combined: ${selectedTable.tables.map(t => `Table T-${t.number}`).join(' + ')} (${selectedTable.totalCapacity} seats)`
+                                : `Table T-${selectedTable.number || selectedTable.id.substring(selectedTable.id.length - 4).toUpperCase()}`
+                              )
+                            : 'None (Auto/Waitlist)'
+                        }</strong></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    className="btn-primary" 
+                    disabled={confirming}
+                    style={{ marginTop: '1.5rem', backgroundColor: selectedTable ? 'var(--status-free)' : 'var(--accent-gold)', opacity: confirming ? 0.7 : 1 }}
+                  >
+                    {confirming 
+                      ? 'Confirming booking...' 
+                      : (selectedTable 
+                          ? (selectedTable.isCombination ? `Confirm Combination (${selectedTable.tables.map(t => `T-${t.number}`).join(' + ')})` : 'Confirm Selected Table') 
+                          : 'Request Table / Join Waitlist')}
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         </div>
       )}

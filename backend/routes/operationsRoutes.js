@@ -68,10 +68,10 @@ router.get('/summary', requireAuth, requireRole('MANAGER'), async (req, res) => 
     const reservedTablesList = [];
     const availableTablesList = [];
 
-    // Group active bookings by table ID for today
+    // Group active bookings by table ID for today and future dates
     const tableTodayBookingsMap = new Map();
     for (const b of allBookings) {
-      if (b.tableId && b.bookingDate === todayStr && b.status !== 'Cancelled' && b.status !== 'No Show') {
+      if (b.tableId && (b.bookingDate >= todayStr) && b.status !== 'Cancelled' && b.status !== 'No Show') {
         const tId = b.tableId._id ? b.tableId._id.toString() : b.tableId.toString();
         if (!tableTodayBookingsMap.has(tId)) {
           tableTodayBookingsMap.set(tId, []);
@@ -86,14 +86,17 @@ router.get('/summary', requireAuth, requireRole('MANAGER'), async (req, res) => 
 
       // Find currently active booking for this table right now
       const currentActiveBooking = todayTableBookings.find(b => 
-        b.status === 'Seated' || 
-        b.status === 'Checked In' ||
-        (b.status === 'Confirmed' && isCurrentTimeSlot(b.bookingDate, b.startTime, b.endTime))
+        b.bookingDate === todayStr && (
+          b.status === 'Seated' || 
+          b.status === 'Checked In' ||
+          (b.status === 'Confirmed' && isCurrentTimeSlot(b.bookingDate, b.startTime, b.endTime))
+        )
       );
 
-      // Find future upcoming confirmed or checked-in booking today
+      // Find future upcoming confirmed or checked-in booking today or future dates
       const upcomingTodayBooking = todayTableBookings.find(b => 
-        (b.status === 'Confirmed' || b.status === 'Checked In') && b.startTime > currentTimeStr
+        (b.status === 'Confirmed' || b.status === 'Checked In') && 
+        (b.bookingDate > todayStr || (b.bookingDate === todayStr && b.startTime > currentTimeStr))
       );
 
       let operationalStatus = 'AVAILABLE';

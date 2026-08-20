@@ -45,7 +45,8 @@ function getNotificationIcon(type) {
     case 'BOOKING_NO_SHOW':
       return <AlertCircle size={16} style={{ color: 'var(--status-occupied)' }} />;
     case 'WAITLIST_PROMOTED':
-      return <Sparkles size={16} style={{ color: 'var(--accent-gold)' }} />;
+    case 'WAITLIST_JOINED':
+      return <Users size={16} style={{ color: 'var(--status-waitlist)' }} />;
     case 'RESERVATION_REMINDER':
       return <Clock size={16} style={{ color: '#f59e0b' }} />;
     case 'LONG_DINING':

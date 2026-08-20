@@ -32,10 +32,16 @@ export default function AnalyticsDashboard() {
   const [tableSearch, setTableSearch] = useState('');
 
   // Initialize dates based on preset
+  const toLocalDateString = (d) => {
+    const offset = d.getTimezoneOffset();
+    const local = new Date(d.getTime() - (offset * 60 * 1000));
+    return local.toISOString().split('T')[0];
+  };
+
   const applyPreset = (selectedPreset) => {
     setPreset(selectedPreset);
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = toLocalDateString(today);
 
     if (selectedPreset === 'today') {
       setStartDate(todayStr);
@@ -43,16 +49,16 @@ export default function AnalyticsDashboard() {
     } else if (selectedPreset === '7days') {
       const past7 = new Date(today);
       past7.setDate(today.getDate() - 7);
-      setStartDate(past7.toISOString().split('T')[0]);
+      setStartDate(toLocalDateString(past7));
       setEndDate(todayStr);
     } else if (selectedPreset === '30days') {
       const past30 = new Date(today);
       past30.setDate(today.getDate() - 30);
-      setStartDate(past30.toISOString().split('T')[0]);
+      setStartDate(toLocalDateString(past30));
       setEndDate(todayStr);
     } else if (selectedPreset === 'thisMonth') {
       const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-      setStartDate(firstDay.toISOString().split('T')[0]);
+      setStartDate(toLocalDateString(firstDay));
       setEndDate(todayStr);
     }
   };

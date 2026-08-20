@@ -23,6 +23,7 @@ const NotificationSchema = new mongoose.Schema({
       'BOOKING_SEATED',
       'BOOKING_COMPLETED',
       'BOOKING_NO_SHOW',
+      'WAITLIST_JOINED',
       'WAITLIST_PROMOTED',
       'RESERVATION_REMINDER',
       'UPCOMING_RESERVATION',

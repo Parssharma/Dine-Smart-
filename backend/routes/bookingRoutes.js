@@ -125,7 +125,7 @@ router.get('/:id/history', requireAuth, async (req, res) => {
 // @route   POST /api/bookings
 // @desc    Create a new booking (Direct booking if table selected, otherwise waitlist fallback)
 router.post('/', optionalAuth, async (req, res) => {
-  const { customerName, partySize, contact, tableId, bookingDate, startTime, endTime } = req.body;
+  const { customerName, partySize, contact, tableId, tableIds, bookingDate, startTime, endTime } = req.body;
   
   await acquireGlobalLock();
   try {
@@ -196,22 +196,27 @@ router.post('/', optionalAuth, async (req, res) => {
     // Optional user ID from token
     const userId = req.user ? req.user.id : null;
 
-    if (tableId) {
-      // Direct booking with specific table
-      const isAvailable = availableTables.some(t => t._id.toString() === tableId);
+    const rawTableIds = Array.isArray(tableIds) && tableIds.length > 0
+      ? tableIds
+      : (tableId ? [tableId] : []);
+
+    if (rawTableIds.length === 1) {
+      const singleTableId = rawTableIds[0];
+      // Direct booking with specific single table
+      const isAvailable = availableTables.some(t => t._id.toString() === singleTableId);
       if (!isAvailable) {
         return res.status(400).json({ message: 'Sorry, this table was just booked for the selected time.' });
       }
 
-      const table = await Table.findById(tableId);
+      const table = await Table.findById(singleTableId);
       if (!table) return res.status(404).json({ message: 'Table not found' });
 
       // Create booking instance and validate before occupying table
       const newBooking = new Booking({
         customerName,
         partySize: parseInt(partySize, 10),
-        contact,
-        tableId,
+        contact: cleanContact,
+        tableId: singleTableId,
         userId,
         bookingDate: date,
         startTime: start,
@@ -242,6 +247,16 @@ router.post('/', optionalAuth, async (req, res) => {
           reason: 'Reservation created'
         });
 
+        // Notify Manager of new reservation
+        await createNotification({
+          recipientRole: 'MANAGER',
+          type: 'BOOKING_CONFIRMED',
+          title: 'New Reservation Booked',
+          message: `${customerName} booked Table T-${table.number} for party of ${partySize} on ${date} at ${start}.`,
+          relatedBookingId: savedBooking._id,
+          relatedTableId: table._id
+        });
+
         // Send confirmation notification if user account linked
         if (userId) {
           await createNotification({
@@ -264,15 +279,133 @@ router.post('/', optionalAuth, async (req, res) => {
         }
         throw saveErr;
       }
+    } else if (rawTableIds.length > 1) {
+      // Direct booking with combined multiple tables
+      for (const tid of rawTableIds) {
+        if (!mongoose.Types.ObjectId.isValid(tid)) {
+          return res.status(400).json({ message: 'Invalid table ID format.' });
+        }
+      }
+
+      const selectedTables = await Table.find({ _id: { $in: rawTableIds } });
+      if (selectedTables.length !== rawTableIds.length) {
+        return res.status(404).json({ message: 'One or more selected tables not found.' });
+      }
+
+      const totalCapacity = selectedTables.reduce((acc, t) => acc + t.capacity, 0);
+      if (totalCapacity < parseInt(partySize, 10)) {
+        return res.status(400).json({ message: `Combined table capacity (${totalCapacity}) is insufficient for party size (${partySize}).` });
+      }
+
+      // Check slot availability for all tables in combination
+      const allAvailableForSlot = await getAvailableTables(date, start, end, null);
+      const availableSet = new Set(allAvailableForSlot.map(t => t._id.toString()));
+      for (const t of selectedTables) {
+        if (!availableSet.has(t._id.toString())) {
+          return res.status(400).json({ message: `Sorry, Table T-${t.number} is no longer available for this time slot.` });
+        }
+      }
+
+      const checkPhysical = isCurrentTimeSlot(date, start, end);
+      const newBookings = [];
+      let remainingGuests = parseInt(partySize, 10);
+
+      for (let i = 0; i < selectedTables.length; i++) {
+        const t = selectedTables[i];
+        const assignedGuests = i === selectedTables.length - 1 ? remainingGuests : Math.min(t.capacity, remainingGuests);
+        remainingGuests = Math.max(0, remainingGuests - assignedGuests);
+
+        const b = new Booking({
+          customerName,
+          partySize: assignedGuests > 0 ? assignedGuests : t.capacity,
+          contact: cleanContact,
+          tableId: t._id,
+          userId,
+          bookingDate: date,
+          startTime: start,
+          endTime: end,
+          status: 'Confirmed'
+        });
+        await b.validate();
+        newBookings.push(b);
+      }
+
+      if (checkPhysical) {
+        for (const t of selectedTables) {
+          t.isOccupied = true;
+          await t.save();
+        }
+      }
+
+      try {
+        const savedBookings = [];
+        for (const b of newBookings) {
+          savedBookings.push(await b.save());
+        }
+
+        const tableNames = selectedTables.map(t => `Table T-${t.number}`).join(' + ');
+
+        for (const sb of savedBookings) {
+          await recordAuditEntry({
+            bookingId: sb._id,
+            changedBy: userId,
+            changedByRole: req.user ? req.user.role : 'CUSTOMER',
+            changedByName: req.user ? req.user.name : customerName,
+            previousStatus: null,
+            newStatus: 'Confirmed',
+            reason: `Reservation created for combined seating: ${tableNames}`
+          });
+        }
+
+        // Notify Manager of new combined reservation
+        await createNotification({
+          recipientRole: 'MANAGER',
+          type: 'BOOKING_CONFIRMED',
+          title: 'New Combined Reservation',
+          message: `${customerName} booked ${tableNames} (${totalCapacity} seats) for party of ${partySize} on ${date} at ${start}.`,
+          relatedBookingId: savedBookings[0]._id,
+          relatedTableId: selectedTables[0]._id
+        });
+
+        if (userId) {
+          await createNotification({
+            userId,
+            recipientRole: 'CUSTOMER',
+            type: 'BOOKING_CONFIRMED',
+            title: 'Combined Reservation Confirmed',
+            message: `Your reservation for ${tableNames} (${totalCapacity} total seats) on ${date} at ${start} has been confirmed.`,
+            relatedBookingId: savedBookings[0]._id,
+            relatedTableId: selectedTables[0]._id
+          });
+        }
+
+        const populatedMainBooking = await Booking.findById(savedBookings[0]._id).populate('tableId');
+        return res.status(201).json({
+          type: 'booking',
+          data: populatedMainBooking,
+          allBookings: savedBookings,
+          combinedTables: selectedTables,
+          combinedTableNames: tableNames,
+          totalCapacity
+        });
+      } catch (saveErr) {
+        if (checkPhysical) {
+          for (const t of selectedTables) {
+            t.isOccupied = false;
+            await t.save();
+          }
+        }
+        throw saveErr;
+      }
     } else {
-      // Check if any single table is available right now for this slot
+      // Auto-assign: Check if any single table is available right now for this slot
       if (availableTables.length > 0) {
         // Select the first available table automatically
         const selectedTable = availableTables[0];
         const newBooking = new Booking({
           customerName,
           partySize: parseInt(partySize, 10),
-          contact,
+          contact: cleanContact,
           tableId: selectedTable._id,
           userId,
           bookingDate: date,
@@ -303,6 +436,16 @@ router.post('/', optionalAuth, async (req, res) => {
             reason: 'Reservation created'
           });
 
+          // Notify Manager of new auto-assigned reservation
+          await createNotification({
+            recipientRole: 'MANAGER',
+            type: 'BOOKING_CONFIRMED',
+            title: 'New Reservation Booked',
+            message: `${customerName} booked Table T-${selectedTable.number} for party of ${partySize} on ${date} at ${start}.`,
+            relatedBookingId: savedBooking._id,
+            relatedTableId: selectedTable._id
+          });
+
           // Send confirmation notification if user account linked
           if (userId) {
             await createNotification({
@@ -327,11 +470,120 @@ router.post('/', optionalAuth, async (req, res) => {
         }
       }
 
+      // If no single table, attempt DSA combination auto-assign
+      try {
+        const allFreeTables = await getAvailableTables(date, start, end, null);
+        const tablesPayload = allFreeTables.map(t => ({
+          id: t._id.toString(),
+          capacity: t.capacity,
+          location: t.location,
+          is_occupied: false,
+          rating: t.rating
+        }));
+
+        const dsaResult = await runDsaEngine({
+          action: 'combine',
+          partySize: parseInt(partySize, 10),
+          tables: tablesPayload
+        });
+
+        if (dsaResult.status === 'success' && Array.isArray(dsaResult.combination) && dsaResult.combination.length > 0) {
+          const combTableIds = dsaResult.combination.map(t => t.id);
+          const combTables = await Table.find({ _id: { $in: combTableIds } });
+          
+          if (combTables.length === combTableIds.length) {
+            const checkPhysical = isCurrentTimeSlot(date, start, end);
+            const newBookings = [];
+            let remainingGuests = parseInt(partySize, 10);
+
+            for (let i = 0; i < combTables.length; i++) {
+              const t = combTables[i];
+              const assignedGuests = i === combTables.length - 1 ? remainingGuests : Math.min(t.capacity, remainingGuests);
+              remainingGuests = Math.max(0, remainingGuests - assignedGuests);
+
+              const b = new Booking({
+                customerName,
+                partySize: assignedGuests > 0 ? assignedGuests : t.capacity,
+                contact: cleanContact,
+                tableId: t._id,
+                userId,
+                bookingDate: date,
+                startTime: start,
+                endTime: end,
+                status: 'Confirmed'
+              });
+              await b.validate();
+              newBookings.push(b);
+            }
+
+            if (checkPhysical) {
+              for (const t of combTables) {
+                t.isOccupied = true;
+                await t.save();
+              }
+            }
+
+            const savedBookings = [];
+            for (const b of newBookings) {
+              savedBookings.push(await b.save());
+            }
+
+            const tableNames = combTables.map(t => `Table T-${t.number}`).join(' + ');
+
+            for (const sb of savedBookings) {
+              await recordAuditEntry({
+                bookingId: sb._id,
+                changedBy: userId,
+                changedByRole: req.user ? req.user.role : 'CUSTOMER',
+                changedByName: req.user ? req.user.name : customerName,
+                previousStatus: null,
+                newStatus: 'Confirmed',
+                reason: `Reservation auto-assigned via Backtracking Combiner: ${tableNames}`
+              });
+            }
+
+            // Notify Manager of new auto-combined reservation
+            await createNotification({
+              recipientRole: 'MANAGER',
+              type: 'BOOKING_CONFIRMED',
+              title: 'New Combined Reservation',
+              message: `${customerName} auto-assigned to ${tableNames} for party of ${partySize} on ${date} at ${start}.`,
+              relatedBookingId: savedBookings[0]._id,
+              relatedTableId: combTables[0]._id
+            });
+
+            if (userId) {
+              await createNotification({
+                userId,
+                recipientRole: 'CUSTOMER',
+                type: 'BOOKING_CONFIRMED',
+                title: 'Combined Reservation Confirmed',
+                message: `Your reservation for ${tableNames} on ${date} at ${start} has been confirmed.`,
+                relatedBookingId: savedBookings[0]._id,
+                relatedTableId: combTables[0]._id
+              });
+            }
+
+            const populatedMainBooking = await Booking.findById(savedBookings[0]._id).populate('tableId');
+            return res.status(201).json({
+              type: 'booking',
+              data: populatedMainBooking,
+              allBookings: savedBookings,
+              combinedTables: combTables,
+              combinedTableNames: tableNames,
+              totalCapacity: dsaResult.totalCapacity
+            });
+          }
+        }
+      } catch (combErr) {
+        console.error('Auto-combination failed during booking:', combErr.message);
+      }
+
       // No tables available -> Put on waitlist
       const newWaitlist = new Waitlist({
         customerName,
         partySize: parseInt(partySize, 10),
-        contact,
+        contact: cleanContact,
         userId,
         bookingDate: date,
         startTime: start,
@@ -356,6 +608,14 @@ router.post('/', optionalAuth, async (req, res) => {
         actionType: 'position',
         waitlist: waitlistPayload,
         customerId: savedWaitlist._id.toString()
+      });
+
+      // Notify Manager of new waitlist entry
+      await createNotification({
+        recipientRole: 'MANAGER',
+        type: 'WAITLIST_JOINED',
+        title: 'New Waitlist Request',
+        message: `${customerName} joined the waitlist for party of ${partySize} on ${date} (${start} – ${end}).`
       });
 
       return res.status(201).json({

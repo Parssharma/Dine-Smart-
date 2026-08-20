@@ -10,20 +10,37 @@ export function AuthProvider({ children }) {
 
   // Initialize auth state from localStorage on startup
   useEffect(() => {
-    try {
-      const storedToken = localStorage.getItem('dinesmart_token');
-      const storedUser = localStorage.getItem('dinesmart_user');
-      if (storedToken && storedUser) {
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
+    const initAuth = async () => {
+      try {
+        const storedToken = localStorage.getItem('dinesmart_token');
+        const storedUser = localStorage.getItem('dinesmart_user');
+        if (storedToken && storedUser) {
+          // Validate the token is still valid before trusting it
+          const verifyRes = await fetch(`${API_BASE}/auth/me`, {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${storedToken}`
+            }
+          });
+          if (verifyRes.ok) {
+            setToken(storedToken);
+            setUser(JSON.parse(storedUser));
+          } else {
+            // Token expired or invalid — clear stored credentials
+            console.warn('[AuthContext] Stored token is invalid/expired. Clearing session.');
+            localStorage.removeItem('dinesmart_token');
+            localStorage.removeItem('dinesmart_user');
+          }
+        }
+      } catch (e) {
+        console.error('Error loading stored auth:', e);
+        localStorage.removeItem('dinesmart_token');
+        localStorage.removeItem('dinesmart_user');
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      console.error('Error loading stored auth:', e);
-      localStorage.removeItem('dinesmart_token');
-      localStorage.removeItem('dinesmart_user');
-    } finally {
-      setLoading(false);
-    }
+    };
+    initAuth();
   }, []);
 
   // Login function

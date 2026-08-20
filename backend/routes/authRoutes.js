@@ -134,7 +134,7 @@ router.post('/login', async (req, res) => {
         email: user.email
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '30d' }
     );
 
     return res.json({

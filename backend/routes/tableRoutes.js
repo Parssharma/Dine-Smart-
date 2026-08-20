@@ -59,7 +59,7 @@ router.put('/:id', requireAuth, requireRole('MANAGER'), async (req, res) => {
       await Booking.updateMany(
         { 
           tableId: req.params.id, 
-          status: { $in: ['Confirmed', 'Seated'] },
+          status: { $in: ['Confirmed', 'Checked In', 'Seated'] },
           bookingDate: todayStr,
           startTime: { $lte: currentTimeStr },
           endTime: { $gt: currentTimeStr }

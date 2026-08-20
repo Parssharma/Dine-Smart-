@@ -1330,13 +1330,12 @@ async function runTests() {
 
   // TEST 57: Future booking appears as RESERVED in operations summary
   try {
-    const today = new Date().toISOString().split('T')[0];
     const resB = await fetch(`${API_BASE}/bookings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         customerName: 'Future Guest', partySize: 2, contact: randPhone(),
-        tableId: opT1._id, bookingDate: today, startTime: '23:30', endTime: '23:59'
+        tableId: opT1._id, bookingDate: '2028-12-25', startTime: '19:00', endTime: '20:30'
       })
     });
 
