@@ -4,8 +4,26 @@ import {
   AlertTriangle, LogIn, UserPlus, X, Calendar, Ban
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { isValidPhoneNumber } from 'libphonenumber-js';
 
 const API_BASE = 'http://localhost:5000/api';
+
+function isObviouslyFakeNumber(digitsOnly) {
+  const sequential = "0123456789";
+  const sequentialReversed = "9876543210";
+  if (/^(\d)\1+$/.test(digitsOnly)) return true;
+  if (sequential.includes(digitsOnly) || sequentialReversed.includes(digitsOnly)) return true;
+  const knownJunkPatterns = [
+    "1234567890",
+    "0123456789",
+    "1111111111",
+    "0000000000",
+    "9999999999",
+    "1234554321",
+  ];
+  if (knownJunkPatterns.includes(digitsOnly)) return true;
+  return false;
+}
 
 export default function CustomerPortal() {
   const { user, isAuthenticated, login, register, getAuthHeaders } = useAuth();
@@ -264,9 +282,13 @@ export default function CustomerPortal() {
       return;
     }
 
-    const cleanContact = contact.replace(/[\s\-()]/g, '');
-    if (!/^\d{10}$/.test(cleanContact)) {
-      setErrorMsg('Please enter a valid 10-digit phone number.');
+    if (!isValidPhoneNumber(contact, 'IN')) {
+      setErrorMsg('Please enter a valid phone number.');
+      return;
+    }
+    const digitsOnly = contact.replace(/\D/g, "");
+    if (isObviouslyFakeNumber(digitsOnly)) {
+      setErrorMsg('Please enter your real contact number.');
       return;
     }
 
@@ -1041,10 +1063,15 @@ export default function CustomerPortal() {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">
+                    <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Phone size={16} /> Contact Details
                       </span>
+                      {!isAuthenticated && (
+                        <button type="button" onClick={() => openAuthModal('login')} style={{ background: 'none', border: 'none', color: 'var(--accent-gold)', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline' }}>
+                          Sign in for faster, verified bookings
+                        </button>
+                      )}
                     </label>
                     <input 
                       type="tel" 
@@ -1052,8 +1079,6 @@ export default function CustomerPortal() {
                       placeholder="e.g. 5550199123" 
                       value={contact}
                       onChange={(e) => setContact(e.target.value)}
-                      pattern="^\d{10}$"
-                      title="Please enter a valid 10-digit phone number (digits only)"
                       required
                     />
                   </div>

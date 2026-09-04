@@ -12,7 +12,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const storedToken = localStorage.getItem('dinesmart_token');
+        const storedToken = localStorage.getItem('dinesmart_token') || 
+                            localStorage.getItem('dinesmart_customer_token') || 
+                            localStorage.getItem('dinesmart_manager_token');
         const storedUser = localStorage.getItem('dinesmart_user');
         if (storedToken && storedUser) {
           // Validate the token is still valid before trusting it
@@ -23,18 +25,27 @@ export function AuthProvider({ children }) {
             }
           });
           if (verifyRes.ok) {
+            const verifyData = await verifyRes.json();
+            const activeUser = (verifyData && verifyData.user) ? verifyData.user : JSON.parse(storedUser);
             setToken(storedToken);
-            setUser(JSON.parse(storedUser));
+            setUser(activeUser);
+            localStorage.setItem('dinesmart_user', JSON.stringify(activeUser));
+            const roleKey = activeUser.role === 'MANAGER' ? 'dinesmart_manager_token' : 'dinesmart_customer_token';
+            localStorage.setItem(roleKey, storedToken);
           } else {
             // Token expired or invalid — clear stored credentials
             console.warn('[AuthContext] Stored token is invalid/expired. Clearing session.');
             localStorage.removeItem('dinesmart_token');
+            localStorage.removeItem('dinesmart_customer_token');
+            localStorage.removeItem('dinesmart_manager_token');
             localStorage.removeItem('dinesmart_user');
           }
         }
       } catch (e) {
         console.error('Error loading stored auth:', e);
         localStorage.removeItem('dinesmart_token');
+        localStorage.removeItem('dinesmart_customer_token');
+        localStorage.removeItem('dinesmart_manager_token');
         localStorage.removeItem('dinesmart_user');
       } finally {
         setLoading(false);
@@ -43,8 +54,18 @@ export function AuthProvider({ children }) {
     initAuth();
   }, []);
 
-  // Login function
-  const login = async (email, password) => {
+  // Logout function
+  const logout = () => {
+    setUser(null);
+    setToken(null);
+    localStorage.removeItem('dinesmart_token');
+    localStorage.removeItem('dinesmart_customer_token');
+    localStorage.removeItem('dinesmart_manager_token');
+    localStorage.removeItem('dinesmart_user');
+  };
+
+  // Login function with role validation
+  const login = async (email, password, expectedRole = null) => {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -52,12 +73,29 @@ export function AuthProvider({ children }) {
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      throw new Error(data.message || 'Login failed');
+      throw new Error(data.message || 'Invalid email or password.');
+    }
+
+    // Role-specific validation
+    if (expectedRole) {
+      if (expectedRole === 'CUSTOMER' && data.user?.role === 'MANAGER') {
+        // Manager tried to log in via Customer portal
+        logout();
+        throw new Error('This account is registered for management access. Please use the Management Login.');
+      }
+
+      if (expectedRole === 'MANAGER' && data.user?.role !== 'MANAGER') {
+        // Customer tried to log in via Manager portal
+        logout();
+        throw new Error('Management access is restricted to manager accounts.');
+      }
     }
 
     setToken(data.token);
     setUser(data.user);
     localStorage.setItem('dinesmart_token', data.token);
+    const roleKey = data.user?.role === 'MANAGER' ? 'dinesmart_manager_token' : 'dinesmart_customer_token';
+    localStorage.setItem(roleKey, data.token);
     localStorage.setItem('dinesmart_user', JSON.stringify(data.user));
     return data.user;
   };
@@ -76,13 +114,6 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  // Logout function
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('dinesmart_token');
-    localStorage.removeItem('dinesmart_user');
-  };
 
   const getAuthHeaders = () => {
     const headers = { 'Content-Type': 'application/json' };
@@ -91,6 +122,15 @@ export function AuthProvider({ children }) {
     }
     return headers;
   };
+
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState('login');
+
+  const openAuthModal = (mode = 'login') => {
+    setAuthMode(mode);
+    setShowAuthModal(true);
+  };
+  const closeAuthModal = () => setShowAuthModal(false);
 
   const value = {
     user,
@@ -103,7 +143,11 @@ export function AuthProvider({ children }) {
     login,
     register,
     logout,
-    getAuthHeaders
+    getAuthHeaders,
+    showAuthModal,
+    authMode,
+    openAuthModal,
+    closeAuthModal
   };
 
   return (

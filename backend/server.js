@@ -60,12 +60,21 @@ app.use((err, req, res, next) => {
 
 const { seedInitialData } = require('./utils/seedData');
 
+const { transporter } = require('./utils/mailer');
+
 // Connect to MongoDB & Start Server
 if (process.env.NODE_ENV !== 'test') {
   mongoose.connect(MONGO_URI)
     .then(async () => {
       console.log('Successfully connected to MongoDB.');
       await seedInitialData();
+
+      // Verify SMTP transporter
+      transporter.verify((err) => {
+        if (err) console.error("SMTP transporter verification failed:", err.message);
+        else console.log("SMTP transporter ready.");
+      });
+
       app.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
       });

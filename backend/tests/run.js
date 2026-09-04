@@ -20,6 +20,7 @@ const API_BASE = `http://localhost:${PORT}/api`;
 let server;
 let passedCount = 0;
 let failedCount = 0;
+const failedTestList = [];
 
 function logResult(testName, passed, detail = '') {
   if (passed) {
@@ -27,6 +28,7 @@ function logResult(testName, passed, detail = '') {
     console.log(`  ✓ ${testName} ${detail ? `(${detail})` : ''}`);
   } else {
     failedCount++;
+    failedTestList.push(`${testName} ${detail ? `[${detail}]` : ''}`);
     console.log(`  * ${testName} FAILED! ${detail ? `[${detail}]` : ''}`);
   }
 }
@@ -155,13 +157,14 @@ async function runTests() {
   // TEST 4: Cancel future booking
   // ==========================================================
   try {
+    await Booking.deleteMany({ tableId: t101._id });
     await Table.findByIdAndUpdate(t101._id, { isOccupied: true });
     
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
     const resF = await fetch(`${API_BASE}/bookings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: managerHeaders,
       body: JSON.stringify({
         customerName: 'Frank', partySize: 2, contact: randPhone(),
         tableId: t101._id, bookingDate: tomorrow, startTime: '12:00', endTime: '13:30'
@@ -185,13 +188,16 @@ async function runTests() {
   // TEST 5: Complete current booking
   // ==========================================================
   try {
-    const today = new Date().toISOString().split('T')[0];
     const now = new Date();
+    const offset = now.getTimezoneOffset();
+    const localNow = new Date(now.getTime() - (offset * 60 * 1000));
+    const today = localNow.toISOString().split('T')[0];
     const currH = String(now.getHours()).padStart(2, '0');
     const endH = String(Math.min(23, now.getHours() + 1)).padStart(2, '0');
     const startT = `${currH}:00`;
     const endT = `${endH}:30`;
 
+    await Booking.deleteMany({ tableId: t101._id });
     await Table.findByIdAndUpdate(t101._id, { isOccupied: false });
 
     const resC = await fetch(`${API_BASE}/bookings`, {
@@ -233,7 +239,7 @@ async function runTests() {
     
     await fetch(`${API_BASE}/bookings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: managerHeaders,
       body: JSON.stringify({
         customerName: 'Hannah', partySize: 2, contact: randPhone(),
         tableId: t101._id, bookingDate: tomorrow, startTime: '12:00', endTime: '13:30'
@@ -659,6 +665,69 @@ async function runTests() {
     logResult("TEST 24 - Non-existent booking ID status 404", res.status === 404);
   } catch (err) {
     logResult("TEST 24 - Non-existent booking ID status 404", false, err.message);
+  }
+
+  // ==========================================================
+  // TEST 24.1: Booking lead time < 1 hour rejected
+  // ==========================================================
+  try {
+    const { validateBookingWindow } = require('../utils/bookingWindow');
+    const now = new Date(Date.now() + 30 * 60 * 1000);
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const windowRes = validateBookingWindow(dateStr, timeStr);
+    logResult("TEST 24.1 - Booking lead time < 1 hour rejected", windowRes.valid === false);
+  } catch (err) {
+    logResult("TEST 24.1 - Booking lead time < 1 hour rejected", false, err.message);
+  }
+
+  // ==========================================================
+  // TEST 24.2: Booking lead time > 24 hours rejected
+  // ==========================================================
+  try {
+    const { validateBookingWindow } = require('../utils/bookingWindow');
+    const farFuture = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    const offset = farFuture.getTimezoneOffset();
+    const localFarFuture = new Date(farFuture.getTime() - (offset * 60 * 1000));
+    const dateStr = localFarFuture.toISOString().split('T')[0];
+    const timeStr = `${String(farFuture.getHours()).padStart(2, '0')}:${String(farFuture.getMinutes()).padStart(2, '0')}`;
+    const windowRes = validateBookingWindow(dateStr, timeStr);
+    logResult("TEST 24.2 - Booking lead time > 24 hours rejected", windowRes.valid === false);
+  } catch (err) {
+    logResult("TEST 24.2 - Booking lead time > 24 hours rejected", false, err.message);
+  }
+
+  // ==========================================================
+  // TEST 24.3: Valid booking lead time (3 hours in advance) accepted
+  // ==========================================================
+  try {
+    const { validateBookingWindow } = require('../utils/bookingWindow');
+    const validTime = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    const offset = validTime.getTimezoneOffset();
+    const localValidTime = new Date(validTime.getTime() - (offset * 60 * 1000));
+    const dateStr = localValidTime.toISOString().split('T')[0];
+    const timeStr = `${String(validTime.getHours()).padStart(2, '0')}:${String(validTime.getMinutes()).padStart(2, '0')}`;
+    const windowRes = validateBookingWindow(dateStr, timeStr);
+    logResult("TEST 24.3 - Valid lead time (3 hours) accepted", windowRes.valid === true);
+  } catch (err) {
+    logResult("TEST 24.3 - Valid lead time (3 hours) accepted", false, err.message);
+  }
+
+  // ==========================================================
+  // TEST 24.4: HTTP API lead time constraint enforcement (Out-of-window rejected)
+  // ==========================================================
+  try {
+    const resFarFuture = await fetch(`${API_BASE}/bookings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-enforce-booking-window': 'true' },
+      body: JSON.stringify({
+        customerName: 'Future Guest', partySize: 2, contact: randPhone(),
+        tableId: t101._id, bookingDate: '2028-12-25', startTime: '19:00', endTime: '20:00'
+      })
+    });
+    logResult("TEST 24.4 - HTTP API rejects booking > 24 hours (400)", resFarFuture.status === 400);
+  } catch (err) {
+    logResult("TEST 24.4 - HTTP API rejects booking > 24 hours (400)", false, err.message);
   }
 
   // ==========================================================
@@ -1356,7 +1425,7 @@ async function runTests() {
     logResult("TEST 58 - Future booking preserves isOccupied = false", false, err.message);
   }
 
-  // TEST 59: Currently seated booking appears in currentSeated
+  // TEST 59: Currently seated booking appears in currentSeated, not upcoming, and marks table occupied
   let seatedBookingId;
   try {
     const seatedBooking = await Booking.create({
@@ -1375,12 +1444,14 @@ async function runTests() {
     const res = await fetch(`${API_BASE}/operations/summary`, { headers: managerHeaders });
     const data = await res.json();
     const foundSeated = data.currentSeated?.some(s => s.customerName === 'Seated Customer');
-    logResult("TEST 59 - Currently seated booking appears in currentSeated list", foundSeated);
+    const notInUpcoming = !data.upcomingReservations?.some(s => s.customerName === 'Seated Customer');
+    const tableStateOcc = data.tables?.list?.find(t => t.number === '202')?.isOccupied === true;
+    logResult("TEST 59 - Currently seated booking appears in currentSeated list and not upcoming", foundSeated && notInUpcoming && tableStateOcc);
   } catch (err) {
-    logResult("TEST 59 - Currently seated booking appears in currentSeated list", false, err.message);
+    logResult("TEST 59 - Currently seated booking appears in currentSeated list and not upcoming", false, err.message);
   }
 
-  // TEST 60: Completed booking removed from currentSeated
+  // TEST 60: Completed booking removed from currentSeated and frees table
   try {
     await fetch(`${API_BASE}/bookings/${seatedBookingId}`, {
       method: 'PUT',
@@ -1390,10 +1461,12 @@ async function runTests() {
 
     const res = await fetch(`${API_BASE}/operations/summary`, { headers: managerHeaders });
     const data = await res.json();
-    const stillPresent = data.currentSeated?.some(s => s.customerName === 'Seated Customer');
-    logResult("TEST 60 - Completed booking removed from currentSeated", !stillPresent);
+    const stillPresentInSeated = data.currentSeated?.some(s => s.customerName === 'Seated Customer');
+    const stillPresentInUpcoming = data.upcomingReservations?.some(s => s.customerName === 'Seated Customer');
+    const tableStateFree = data.tables?.list?.find(t => t.number === '202')?.isOccupied === false;
+    logResult("TEST 60 - Completed booking removed from currentSeated and frees table", !stillPresentInSeated && !stillPresentInUpcoming && tableStateFree);
   } catch (err) {
-    logResult("TEST 60 - Completed booking removed from currentSeated", false, err.message);
+    logResult("TEST 60 - Completed booking removed from currentSeated and frees table", false, err.message);
   }
 
   // TEST 61: Cancelled booking removed from upcoming reservations
@@ -1419,7 +1492,8 @@ async function runTests() {
     const res = await fetch(`${API_BASE}/operations/summary`, { headers: managerHeaders });
     const data = await res.json();
     const inUpcoming = data.upcomingReservations?.some(b => b.customerName === 'To Cancel');
-    logResult("TEST 61 - Cancelled booking removed from upcoming reservations", !inUpcoming);
+    const inSeated = data.currentSeated?.some(b => b.customerName === 'To Cancel');
+    logResult("TEST 61 - Cancelled booking removed from upcoming reservations", !inUpcoming && !inSeated);
   } catch (err) {
     logResult("TEST 61 - Cancelled booking removed from upcoming reservations", false, err.message);
   }
@@ -2816,6 +2890,10 @@ async function runTests() {
   console.log(`TOTAL RUN: ${passedCount + failedCount}`);
   console.log(`PASSED: ${passedCount}`);
   console.log(`FAILED: ${failedCount}`);
+  if (failedTestList.length > 0) {
+    console.log("\nFAILED TESTS:");
+    failedTestList.forEach(t => console.log(`  - ${t}`));
+  }
   console.log("==========================================================\n");
 
   mongoose.connection.close();

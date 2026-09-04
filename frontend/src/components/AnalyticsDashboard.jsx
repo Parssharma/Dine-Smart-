@@ -164,19 +164,19 @@ export default function AnalyticsDashboard() {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+    <div className="analytics-view" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       
-      {/* Top Header & Range Controls */}
-      <div className="panel-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.25rem' }}>
+      {/* Top Banner & Date Filter Bar */}
+      <div className="panel-card" style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.25rem' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <BarChart3 size={24} style={{ color: 'var(--accent-gold)' }} />
-            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.6rem', margin: 0 }}>
-              Business Intelligence & Analytics
-            </h2>
+            <BarChart3 size={22} style={{ color: 'var(--accent-gold)' }} />
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0, fontFamily: 'Geist, sans-serif' }}>
+              Analytics & Performance Telemetry
+            </h3>
           </div>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
-            Operational telemetry derived directly from dining activity, table capacity, and the Smart Booking Engine.
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+            Real-time operational insights and metrics derived from live service bookings.
           </span>
         </div>
 
@@ -184,7 +184,7 @@ export default function AnalyticsDashboard() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           
           {/* Preset Buttons */}
-          <div style={{ display: 'flex', backgroundColor: 'var(--bg-secondary)', padding: '0.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div className="stitch-filter-group">
             {[
               { key: 'today', label: 'Today' },
               { key: '7days', label: '7 Days' },
@@ -195,17 +195,7 @@ export default function AnalyticsDashboard() {
               <button
                 key={p.key}
                 onClick={() => applyPreset(p.key)}
-                style={{
-                  padding: '0.35rem 0.65rem',
-                  fontSize: '0.8rem',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: preset === p.key ? 'var(--accent-gold)' : 'transparent',
-                  color: preset === p.key ? '#000' : 'var(--text-secondary)',
-                  fontWeight: preset === p.key ? 700 : 500,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
+                className={`stitch-filter-btn ${preset === p.key ? 'active' : ''}`}
               >
                 {p.label}
               </button>
@@ -214,7 +204,7 @@ export default function AnalyticsDashboard() {
 
           {/* Custom Date Pickers if custom selected */}
           {preset === 'custom' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <input
                 type="date"
                 className="form-input"
@@ -237,22 +227,22 @@ export default function AnalyticsDashboard() {
           <button
             onClick={() => fetchAnalytics(true)}
             disabled={refreshing || loading}
-            className="btn-secondary"
-            style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+            className="stitch-action-btn secondary"
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
             title="Refresh Analytics Dataset"
           >
-            <RefreshCw size={14} className={refreshing ? 'spinning' : ''} />
-            <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
+            <RefreshCw size={13} className={refreshing ? 'spinning' : ''} />
+            <span>{refreshing ? 'Syncing...' : 'Sync'}</span>
           </button>
 
           {/* CSV Export Button */}
           <button
             onClick={handleExportCSV}
-            className="btn-primary"
-            style={{ padding: '0.45rem 0.95rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: 'var(--accent-gold)' }}
+            className="stitch-action-btn primary"
+            style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem' }}
             title="Export CSV Report"
           >
-            <Download size={14} />
+            <Download size={13} />
             <span>Export CSV</span>
           </button>
         </div>
@@ -273,95 +263,98 @@ export default function AnalyticsDashboard() {
       ) : overview ? (
         <>
           {/* ==========================================
-             1. CORE KPI CARDS GRID
+             1. CORE KPI CARDS GRID (STITCH BENTO KPI)
              ========================================== */}
-          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
             
             {/* Total Bookings */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(217,119,6,0.1)', color: 'var(--accent-gold)' }}>
-                <Calendar size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>Total Bookings</span>
+                <Calendar size={16} style={{ color: 'var(--accent-gold)' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.totalBookings}</h4>
-                <span>Total Bookings</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '2rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+                {overview.totalBookings}
               </div>
             </div>
 
             {/* Completed Rate */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(16,185,129,0.1)', color: 'var(--status-free)' }}>
-                <CheckCircle2 size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>Completion Rate</span>
+                <CheckCircle2 size={16} style={{ color: 'var(--status-free)' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.completionRate}%</h4>
-                <span>Completed ({overview.completedBookings})</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '2rem', fontWeight: 700, color: 'var(--status-free)', lineHeight: 1 }}>
+                {overview.completionRate}%
               </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{overview.completedBookings} Completed</span>
             </div>
 
             {/* Cancellation Rate */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: 'var(--status-occupied)' }}>
-                <XCircle size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>Cancellation Rate</span>
+                <XCircle size={16} style={{ color: 'var(--status-occupied)' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.cancellationRate}%</h4>
-                <span>Cancelled ({overview.cancelledBookings})</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '2rem', fontWeight: 700, color: 'var(--status-occupied)', lineHeight: 1 }}>
+                {overview.cancellationRate}%
               </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{overview.cancelledBookings} Cancelled</span>
             </div>
 
             {/* No-Show Rate */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: 'var(--status-waitlist)' }}>
-                <AlertTriangle size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>No-Show Rate</span>
+                <AlertTriangle size={16} style={{ color: 'var(--status-waitlist)' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.noShowRate}%</h4>
-                <span>No Shows ({overview.noShowBookings})</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '2rem', fontWeight: 700, color: 'var(--status-waitlist)', lineHeight: 1 }}>
+                {overview.noShowRate}%
               </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{overview.noShowBookings} No-Shows</span>
             </div>
 
             {/* Average Dining Duration */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(139,92,246,0.1)', color: '#a78bfa' }}>
-                <Clock size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>Avg Dining Time</span>
+                <Clock size={16} style={{ color: '#a78bfa' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.averageDiningDurationMinutes !== null ? `${overview.averageDiningDurationMinutes} min` : 'N/A'}</h4>
-                <span>Avg Dining Time</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+                {overview.averageDiningDurationMinutes !== null ? `${overview.averageDiningDurationMinutes}m` : 'N/A'}
               </div>
             </div>
 
             {/* Average Party Size */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(59,130,246,0.1)', color: '#60a5fa' }}>
-                <Users size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>Avg Party Size</span>
+                <Users size={16} style={{ color: '#60a5fa' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.averagePartySize}</h4>
-                <span>Avg Party Size</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '2rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+                {overview.averagePartySize}
               </div>
             </div>
 
             {/* Table Utilization */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(16,185,129,0.1)', color: 'var(--status-free)' }}>
-                <Utensils size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>Table Utilization</span>
+                <Utensils size={16} style={{ color: 'var(--status-free)' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.tableUtilization}%</h4>
-                <span>Table Utilization</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '2rem', fontWeight: 700, color: 'var(--status-free)', lineHeight: 1 }}>
+                {overview.tableUtilization}%
               </div>
             </div>
 
             {/* Waitlist Conversion */}
-            <div className="kpi-card">
-              <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: 'var(--accent-gold)' }}>
-                <TrendingUp size={22} />
+            <div className="stitch-kpi-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="stitch-kpi-label" style={{ textTransform: 'uppercase', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em' }}>Waitlist Seating</span>
+                <TrendingUp size={16} style={{ color: 'var(--accent-gold)' }} />
               </div>
-              <div className="kpi-details">
-                <h4>{overview.waitlist?.conversionRate}%</h4>
-                <span>Waitlist Conversion</span>
+              <div style={{ fontFamily: 'Geist, monospace', fontSize: '2rem', fontWeight: 700, color: 'var(--accent-gold)', lineHeight: 1 }}>
+                {overview.waitlist?.conversionRate}%
               </div>
             </div>
           </div>
@@ -558,7 +551,7 @@ export default function AnalyticsDashboard() {
                 <Sparkles size={22} style={{ color: 'var(--accent-gold)' }} />
                 <div>
                   <h3 className="panel-title" style={{ margin: 0 }}>
-                    Smart Booking Engine Telemetry
+                    Smart Booking System Telemetry
                   </h3>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     Live performance telemetry for Smart Table Recommendations, Smart Seating Assistant, and Table Search.
@@ -673,7 +666,7 @@ export default function AnalyticsDashboard() {
                 </thead>
                 <tbody>
                   {filteredTables.map(t => (
-                    <tr key={t.tableId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <tr key={t.tableId} style={{ borderBottom: '1px solid var(--border-color)' }}>
                       <td style={{ padding: '0.75rem 0.5rem', fontWeight: 600 }}>
                         Table T-{t.number}
                       </td>

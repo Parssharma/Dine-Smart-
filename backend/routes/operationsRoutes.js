@@ -71,7 +71,7 @@ router.get('/summary', requireAuth, requireRole('MANAGER'), async (req, res) => 
     // Group active bookings by table ID for today and future dates
     const tableTodayBookingsMap = new Map();
     for (const b of allBookings) {
-      if (b.tableId && (b.bookingDate >= todayStr) && b.status !== 'Cancelled' && b.status !== 'No Show') {
+      if (b.tableId && (b.bookingDate >= todayStr || b.status === 'Seated') && b.status !== 'Cancelled' && b.status !== 'No Show' && b.status !== 'Completed') {
         const tId = b.tableId._id ? b.tableId._id.toString() : b.tableId.toString();
         if (!tableTodayBookingsMap.has(tId)) {
           tableTodayBookingsMap.set(tId, []);
@@ -86,27 +86,27 @@ router.get('/summary', requireAuth, requireRole('MANAGER'), async (req, res) => 
 
       // Find currently active booking for this table right now
       const currentActiveBooking = todayTableBookings.find(b => 
-        b.bookingDate === todayStr && (
-          b.status === 'Seated' || 
-          b.status === 'Checked In' ||
-          (b.status === 'Confirmed' && isCurrentTimeSlot(b.bookingDate, b.startTime, b.endTime))
-        )
+        b.status === 'Seated' || 
+        b.status === 'Checked In' ||
+        (b.status === 'Confirmed' && b.bookingDate === todayStr && isCurrentTimeSlot(b.bookingDate, b.startTime, b.endTime))
       );
 
       // Find future upcoming confirmed or checked-in booking today or future dates
       const upcomingTodayBooking = todayTableBookings.find(b => 
         (b.status === 'Confirmed' || b.status === 'Checked In') && 
+        (!currentActiveBooking || b._id.toString() !== currentActiveBooking._id.toString()) &&
         (b.bookingDate > todayStr || (b.bookingDate === todayStr && b.startTime > currentTimeStr))
       );
 
+      const isPhysicallyOccupied = Boolean(table.isOccupied || (currentActiveBooking && currentActiveBooking.status === 'Seated'));
       let operationalStatus = 'AVAILABLE';
       let currentGuest = null;
       let nextReservation = null;
 
-      if (table.isOccupied || (currentActiveBooking && currentActiveBooking.status === 'Seated')) {
+      if (isPhysicallyOccupied) {
         operationalStatus = 'OCCUPIED';
         if (currentActiveBooking) {
-          const seatedTime = currentActiveBooking.seatedAt || currentActiveBooking.bookingTime || currentActiveBooking.createdAt;
+          const seatedTime = currentActiveBooking.seatedAt || currentActiveBooking.checkedInAt || currentActiveBooking.bookingTime || currentActiveBooking.createdAt;
           const duration = seatedTime ? Math.max(0, Math.round((now.getTime() - new Date(seatedTime).getTime()) / 60000)) : 0;
           currentGuest = {
             bookingId: currentActiveBooking._id,
@@ -115,6 +115,7 @@ router.get('/summary', requireAuth, requireRole('MANAGER'), async (req, res) => 
             contact: currentActiveBooking.contact,
             startTime: currentActiveBooking.startTime,
             endTime: currentActiveBooking.endTime,
+            bookingDate: currentActiveBooking.bookingDate,
             seatedAt: seatedTime,
             durationMinutes: duration,
             status: currentActiveBooking.status
@@ -143,7 +144,7 @@ router.get('/summary', requireAuth, requireRole('MANAGER'), async (req, res) => 
         number: table.number,
         capacity: table.capacity,
         location: table.location,
-        isOccupied: table.isOccupied,
+        isOccupied: isPhysicallyOccupied,
         rating: table.rating,
         operationalStatus,
         currentGuest,

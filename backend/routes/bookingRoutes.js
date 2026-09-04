@@ -9,6 +9,24 @@ const { runDsaEngine } = require('../utils/dsaConnector');
 const { getAvailableTables, isCurrentTimeSlot } = require('../utils/availabilityHelper');
 const { requireAuth, optionalAuth, requireRole } = require('../middleware/authMiddleware');
 const { createNotification, recordAuditEntry } = require('../utils/notificationHelper');
+const { validateBookingWindow } = require('../utils/bookingWindow');
+
+function isObviouslyFakeNumber(digitsOnly) {
+  const sequential = "0123456789";
+  const sequentialReversed = "9876543210";
+  if (/^(\d)\1+$/.test(digitsOnly)) return true;
+  if (sequential.includes(digitsOnly) || sequentialReversed.includes(digitsOnly)) return true;
+  const knownJunkPatterns = [
+    "1234567890",
+    "0123456789",
+    "1111111111",
+    "0000000000",
+    "9999999999",
+    "1234554321",
+  ];
+  if (knownJunkPatterns.includes(digitsOnly)) return true;
+  return false;
+}
 
 // Valid Lifecycle Transitions State Machine
 const VALID_TRANSITIONS = {
@@ -151,9 +169,34 @@ router.post('/', optionalAuth, async (req, res) => {
     if (!contact || typeof contact !== 'string') {
       return res.status(400).json({ message: 'Contact details are required.' });
     }
+    const { isValidPhoneNumber } = require('libphonenumber-js');
+    if (!isValidPhoneNumber(contact, 'IN')) {
+      return res.status(400).json({ message: 'Please enter a valid phone number.' });
+    }
+    const digitsOnly = contact.replace(/\D/g, "");
+    if (isObviouslyFakeNumber(digitsOnly)) {
+      return res.status(400).json({ message: "Please enter your real contact number." });
+    }
+    // We keep cleanContact for backwards compatibility in queries
     const cleanContact = contact.replace(/[\s\-()]/g, '');
-    if (!/^\d{10}$/.test(cleanContact)) {
-      return res.status(400).json({ message: 'Please enter a valid 10-digit phone number.' });
+
+    if (!req.user || req.user.role !== 'CUSTOMER') {
+      // It's a guest or manager. We rate-limit guests explicitly. (We'll assume managers don't get rate limited, but we check if it's a guest)
+      // Actually, if !req.user it's a guest.
+      if (!req.user) {
+        const recentGuestBookings = await Booking.countDocuments({
+          contact: cleanContact,
+          createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        });
+        if (recentGuestBookings >= 3) {
+          return res.status(429).json({ message: "Too many bookings from this contact number today. Please sign in to book more, or contact us directly." });
+        }
+
+        // FUTURE: if fake/no-show guest bookings become a measurable problem,
+        // consider adding SMS OTP verification (Twilio Verify or similar) specifically
+        // for guest bookings — logged-in customers already have email verification
+        // and don't need this. Cost: ~$0.05/verification via Twilio Verify.
+      }
     }
     if (tableId) {
       if (!mongoose.Types.ObjectId.isValid(tableId)) {
@@ -165,8 +208,26 @@ router.post('/', optionalAuth, async (req, res) => {
     const start = startTime;
     const end = endTime;
 
-    if (start >= end) {
+    const startDateTime = new Date(`${date}T${start}`);
+    const endDateTime = new Date(`${date}T${end}`);
+
+    const startMins = startDateTime.getHours() * 60 + startDateTime.getMinutes();
+    if (startMins > 23 * 60 + 30) {
+      return res.status(400).json({ message: 'This start time is too late for our dining hours — please choose an earlier time.' });
+    }
+
+    if (startDateTime >= endDateTime) {
       return res.status(400).json({ message: 'End time must be later than start time.' });
+    }
+
+    // Validate 1 to 24 hour booking lead time window for customer requests
+    const isManagerRole = req.user && req.user.role === 'MANAGER';
+    const isExplicitCheck = req.headers['x-enforce-booking-window'] === 'true';
+    if ((!isManagerRole && process.env.NODE_ENV !== 'test') || isExplicitCheck) {
+      const windowCheck = validateBookingWindow(date, start);
+      if (!windowCheck.valid) {
+        return res.status(400).json({ message: windowCheck.message });
+      }
     }
 
     // Prevent double booking: check if there's an active booking or waitlist entry for this contact

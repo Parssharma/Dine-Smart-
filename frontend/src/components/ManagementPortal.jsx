@@ -1,23 +1,37 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Plus, Users, User, Trash2, CheckCircle2, RotateCw, GitMerge, Layout, 
   AlertCircle, BarChart3, Settings, Compass, Calendar, ListTodo, LogOut, 
   Clock, Sparkles, Check, X, ShieldCheck, Lock, Mail, AlertTriangle,
   Timer, ChevronRight, Phone, ArrowRight, UserCheck, Info
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import NotificationCenter from './NotificationCenter';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import DashboardView from '../management/components/DashboardView';
+import FloorPlanView from '../management/components/FloorPlanView';
+import WaitlistView from '../management/components/WaitlistView';
+import TopNav from '../management/components/TopNav';
+import { classifyTableReservations } from '../utils/reservationClassification';
 
 const API_BASE = 'http://localhost:5000/api';
 
-export default function ManagementPortal() {
-  const { user, isAuthenticated, isManager, login, logout, getAuthHeaders } = useAuth();
+// Map internal view names to management routes
+const VIEW_ROUTE_MAP = {
+  dashboard: '/management',
+  floor: '/management/floor',
+  seating: '/management/floor',
+  bookings: '/management/bookings',
+  history: '/management/history',
+  waitlist: '/management/waitlist',
+  tables: '/management/tables',
+  analytics: '/management/analytics'
+};
 
-  // Manager Login Form State
-  const [managerEmail, setManagerEmail] = useState('');
-  const [managerPassword, setManagerPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
+export default function ManagementPortal({ initialView = 'dashboard' }) {
+  const { user, isAuthenticated, isManager, login, logout, getAuthHeaders } = useAuth();
+  const navigate = useNavigate();
 
   // Lists & Operational State
   const [tables, setTables] = useState([]);
@@ -33,8 +47,20 @@ export default function ManagementPortal() {
     lastUpdated: null
   });
 
-  // Navigation state
-  const [currentView, setCurrentView] = useState('dashboard'); // dashboard | floor | bookings | waitlist | tables | analytics
+  // Navigation state — initialized from route via initialView prop
+  const [currentView, setCurrentView] = useState(initialView);
+
+  // Sync currentView when route changes (initialView prop changes)
+  useEffect(() => {
+    setCurrentView(initialView);
+  }, [initialView]);
+
+  // Navigate to a management view — updates both internal state and URL
+  const navigateToView = useCallback((view) => {
+    setCurrentView(view);
+    const route = VIEW_ROUTE_MAP[view] || '/management';
+    navigate(route);
+  }, [navigate]);
 
   // Time ticker state
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -95,21 +121,7 @@ export default function ManagementPortal() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleManagerLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-    setLoggingIn(true);
-    try {
-      const loggedUser = await login(managerEmail, managerPassword);
-      if (loggedUser.role !== 'MANAGER') {
-        setLoginError('Access denied. This account does not possess Manager privileges.');
-      }
-    } catch (err) {
-      setLoginError(err.message || 'Login failed. Please check credentials.');
-    } finally {
-      setLoggingIn(false);
-    }
-  };
+  // Manager login is now handled by ManagementLoginPage
 
   // Fetch all operations & portal data
   const fetchData = async (silent = false) => {
@@ -222,33 +234,13 @@ export default function ManagementPortal() {
   }, [isManager, currentView]);
 
   const getTableReservations = (tableId) => {
-    return bookings.filter(b => 
-      (b.tableId?._id === tableId || b.tableId === tableId) && 
-      (b.status === 'Confirmed' || b.status === 'Seated')
-    ).sort((a, b) => {
-      if (a.bookingDate !== b.bookingDate) {
-        return a.bookingDate.localeCompare(b.bookingDate);
-      }
-      return a.startTime.localeCompare(b.startTime);
-    });
+    const { upcomingReservations } = classifyTableReservations(tableId, bookings, null, currentTime);
+    return upcomingReservations;
   };
 
   const getCurrentBooking = (tableId) => {
-    const tableBookings = getTableReservations(tableId);
-    const now = new Date();
-    const offset = now.getTimezoneOffset();
-    const localNow = new Date(now.getTime() - (offset * 60 * 1000));
-    const currentTodayStr = localNow.toISOString().split('T')[0];
-    
-    const currentHours = String(now.getHours()).padStart(2, '0');
-    const currentMinutes = String(now.getMinutes()).padStart(2, '0');
-    const currentTimeStr = `${currentHours}:${currentMinutes}`;
-
-    return tableBookings.find(b => 
-      b.bookingDate === currentTodayStr && 
-      currentTimeStr >= b.startTime && 
-      currentTimeStr < b.endTime
-    );
+    const { currentSeating } = classifyTableReservations(tableId, bookings, null, currentTime);
+    return currentSeating;
   };
 
   // Add a Table
@@ -647,107 +639,7 @@ export default function ManagementPortal() {
     }
   };
 
-  // ==========================================
-  // AUTHENTICATION GUARDS
-  // ==========================================
-  if (!isAuthenticated) {
-    return (
-      <div style={{ maxWidth: '440px', margin: '4rem auto', padding: '0 1rem' }}>
-        <div className="panel-card" style={{ padding: '2.5rem 2rem' }}>
-          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-            <div style={{ display: 'inline-flex', padding: '0.75rem', borderRadius: 'var(--radius-full)', backgroundColor: 'var(--accent-gold-glow)', color: 'var(--accent-gold)', marginBottom: '1rem' }}>
-              <ShieldCheck size={36} />
-            </div>
-            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.6rem', marginBottom: '0.5rem' }}>
-              Manager Portal
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-              Restricted Area. Please sign in with your DineSmart Manager credentials.
-            </p>
-          </div>
-
-          {loginError && (
-            <div className="alert-banner" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: 'var(--status-occupied)', marginBottom: '1.5rem' }}>
-              <AlertCircle size={18} />
-              <div style={{ fontSize: '0.85rem' }}>{loginError}</div>
-            </div>
-          )}
-
-          <form onSubmit={handleManagerLogin}>
-            <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-              <label className="form-label">
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Mail size={16} /> Manager Email
-                </span>
-              </label>
-              <input
-                type="email"
-                className="form-input"
-                placeholder="manager@dinesmart.com"
-                value={managerEmail}
-                onChange={(e) => setManagerEmail(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '1.75rem' }}>
-              <label className="form-label">
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Lock size={16} /> Password
-                </span>
-              </label>
-              <input
-                type="password"
-                className="form-input"
-                placeholder="••••••••••••"
-                value={managerPassword}
-                onChange={(e) => setManagerPassword(e.target.value)}
-                required
-              />
-            </div>
-
-            <button 
-              type="submit" 
-              className="btn-primary" 
-              disabled={loggingIn}
-              style={{ width: '100%', padding: '0.8rem', fontWeight: 600, fontSize: '0.95rem' }}
-            >
-              {loggingIn ? 'Authenticating Manager...' : 'Sign In as Manager'}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  if (isAuthenticated && !isManager) {
-    return (
-      <div style={{ maxWidth: '500px', margin: '4rem auto', padding: '0 1rem' }}>
-        <div className="panel-card" style={{ padding: '2.5rem 2rem', textAlign: 'center' }}>
-          <div style={{ display: 'inline-flex', padding: '0.75rem', borderRadius: 'var(--radius-full)', backgroundColor: 'var(--status-occupied-glow)', color: 'var(--status-occupied)', marginBottom: '1.25rem' }}>
-            <AlertCircle size={40} />
-          </div>
-          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.6rem', marginBottom: '0.75rem' }}>
-            Access Denied
-          </h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: '1.5', marginBottom: '1.5rem' }}>
-            Your account is authenticated as <strong>{user?.name}</strong> with the <strong>CUSTOMER</strong> role.
-            <br />
-            Manager role is required to access table operations, smart seating, and live floor management.
-          </p>
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-            <button 
-              onClick={logout} 
-              className="btn-primary"
-              style={{ padding: '0.6rem 1.25rem', fontSize: '0.9rem' }}
-            >
-              Log Out & Switch Account
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Authentication guards are now handled by ManagementLayout (route-level)
 
   // Derive Table operational lists
   const displayTables = operations.tables?.list?.length > 0 ? operations.tables.list : tables.map(t => ({
@@ -769,119 +661,22 @@ export default function ManagementPortal() {
     <div className="dashboard-container">
       
       {/* ==========================================
-         SIDEBAR NAVIGATION
+         TOP NAVIGATION BAR
          ========================================== */}
-      <aside className="dashboard-sidebar">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div className="logo-container" style={{ padding: '0 0.5rem' }}>
-            <Sparkles size={24} style={{ color: 'var(--accent-gold)' }} />
-            <span style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '0.05em' }}>DineSmart</span>
-          </div>
-
-          <nav className="sidebar-nav">
-            <button 
-              className={`sidebar-btn ${currentView === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setCurrentView('dashboard')}
-            >
-              <Layout size={18} />
-              Operations Dashboard
-            </button>
-            <button 
-              className={`sidebar-btn ${currentView === 'floor' ? 'active' : ''}`}
-              onClick={() => setCurrentView('floor')}
-            >
-              <Compass size={18} />
-              Floor Plan
-            </button>
-            <button 
-              className={`sidebar-btn ${currentView === 'bookings' ? 'active' : ''}`}
-              onClick={() => setCurrentView('bookings')}
-            >
-              <Calendar size={18} />
-              All Bookings
-            </button>
-            <button 
-              className={`sidebar-btn ${currentView === 'history' ? 'active' : ''}`}
-              onClick={() => setCurrentView('history')}
-            >
-              <Clock size={18} />
-              Reservation History
-            </button>
-            <button 
-              className={`sidebar-btn ${currentView === 'waitlist' ? 'active' : ''}`}
-              onClick={() => setCurrentView('waitlist')}
-            >
-              <Users size={18} />
-              Waitlist
-            </button>
-            <button 
-              className={`sidebar-btn ${currentView === 'tables' ? 'active' : ''}`}
-              onClick={() => setCurrentView('tables')}
-            >
-              <ListTodo size={18} />
-              Tables
-            </button>
-            <button 
-              className={`sidebar-btn ${currentView === 'analytics' ? 'active' : ''}`}
-              onClick={() => setCurrentView('analytics')}
-            >
-              <BarChart3 size={18} />
-              Analytics
-            </button>
-          </nav>
-        </div>
-
-        <div className="sidebar-footer">
-          <div className="sidebar-profile">
-            <div className="profile-avatar">
-              <User size={18} />
-            </div>
-            <div className="profile-info">
-              <h5>{user?.name || 'Manager'}</h5>
-              <span>Host Console</span>
-            </div>
-          </div>
-          <div className="status-indicator">
-            <span className="status-dot active"></span>
-            <span>Live Operations: <strong>Active</strong></span>
-          </div>
-        </div>
-      </aside>
+      <TopNav
+        currentView={currentView}
+        navigateToView={navigateToView}
+        fetchData={fetchData}
+        isRefreshing={isRefreshing}
+        user={user}
+        logout={logout}
+        navigate={navigate}
+      />
 
       {/* ==========================================
          MAIN CONTENT AREA
          ========================================== */}
       <main className="dashboard-content">
-        
-        {/* Header Bar */}
-        <header className="dashboard-header">
-          <div>
-            <h2 style={{ fontSize: '1.6rem', textTransform: 'capitalize' }}>
-              {currentView === 'dashboard' ? 'Restaurant Operations Hub' : currentView === 'floor' ? 'Interactive Floor Plan' : `${currentView} Panel`}
-            </h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.25rem' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                {currentTime.toLocaleTimeString()} • {currentTime.toLocaleDateString()}
-              </span>
-              <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: 'var(--radius-full)', backgroundColor: 'var(--status-free-glow)', color: 'var(--status-free)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                <span className="status-dot active" style={{ width: '6px', height: '6px' }}></span> Real-Time Polling
-              </span>
-            </div>
-          </div>
-
-          <div className="header-meta">
-            <button 
-              onClick={() => fetchData()} 
-              disabled={isRefreshing}
-              className="btn-secondary" 
-              style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontWeight: 600 }}
-              title="Manually sync latest operational data"
-            >
-              <RotateCw size={16} className={isRefreshing ? 'spin-animation' : ''} />
-              <span>{isRefreshing ? 'Syncing...' : 'Refresh Operations'}</span>
-            </button>
-          </div>
-        </header>
 
         {errorMsg && (
           <div className="alert-banner" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: 'var(--status-occupied)', marginBottom: '1.5rem' }}>
@@ -894,1086 +689,209 @@ export default function ManagementPortal() {
         )}
 
         {/* ==========================================
-           VIEW: DASHBOARD (PHASE 14 ENHANCED)
+           VIEW: DASHBOARD (PHASE UI-1 STITCH MIGRATION)
            ========================================== */}
         {currentView === 'dashboard' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            
-            {/* 1. Live Operational KPI Cards */}
-            <div className="kpi-grid">
-              <div className="kpi-card">
-                <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(217, 119, 6, 0.1)', color: 'var(--accent-gold)' }}>
-                  <ListTodo size={20} />
-                </div>
-                <div className="kpi-details">
-                  <h4>{totalTableCount}</h4>
-                  <span>Total Tables</span>
-                </div>
-              </div>
-
-              <div className="kpi-card">
-                <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--status-free)' }}>
-                  <Check size={20} />
-                </div>
-                <div className="kpi-details">
-                  <h4>{availableTableCount}</h4>
-                  <span>Available</span>
-                </div>
-              </div>
-
-              <div className="kpi-card">
-                <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--status-occupied)' }}>
-                  <Users size={20} />
-                </div>
-                <div className="kpi-details">
-                  <h4>{occupiedTableCount}</h4>
-                  <span>Occupied</span>
-                </div>
-              </div>
-
-              <div className="kpi-card">
-                <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa' }}>
-                  <Calendar size={20} />
-                </div>
-                <div className="kpi-details">
-                  <h4>{reservedTableCount}</h4>
-                  <span>Reserved</span>
-                </div>
-              </div>
-
-              <div 
-                className="kpi-card" 
-                onClick={() => setCurrentView('waitlist')}
-                style={{ cursor: 'pointer' }}
-                title="Click to view and manage waiting list"
-              >
-                <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--status-waitlist)' }}>
-                  <Clock size={20} />
-                </div>
-                <div className="kpi-details">
-                  <h4>{waitingCount}</h4>
-                  <span>Waiting (Click)</span>
-                </div>
-              </div>
-
-              <div className="kpi-card">
-                <div className="kpi-icon-wrapper" style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)', color: '#a78bfa' }}>
-                  <Timer size={20} />
-                </div>
-                <div className="kpi-details">
-                  <h4 style={{ fontSize: avgTurnover ? '1.5rem' : '1.1rem' }}>
-                    {avgTurnover ? `${avgTurnover} min` : 'No data'}
-                  </h4>
-                  <span>Avg Dining Time</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Top Split Grid: Live Floor Plan (Left) + Operational Alerts (Right) */}
-            <div className="grid-layout" style={{ gridTemplateColumns: '1.25fr 0.75fr', gap: '1.5rem' }}>
-              
-              {/* Left: Live Floor Plan */}
-              <div className="panel-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <div>
-                    <h3 className="panel-title" style={{ margin: 0 }}>Live Floor Plan</h3>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      Click any table card to inspect details and perform host actions.
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem' }}>
-                    <span className="status-badge available">● Available</span>
-                    <span className="status-badge occupied">● Occupied</span>
-                    <span className="status-badge reserved">● Reserved</span>
-                  </div>
-                </div>
-
-                <div className="floor-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>
-                  {displayTables.map(table => {
-                    const isCombined = combinedTables.includes(table._id);
-                    const status = table.operationalStatus || (table.isOccupied ? 'OCCUPIED' : 'AVAILABLE');
-                    const hasTurnoverWarning = status === 'OCCUPIED' && table.nextReservation && table.nextReservation.startsInMinutes <= 45;
-
-                    return (
-                      <div 
-                        key={table._id}
-                        className={`table-node ${status === 'OCCUPIED' ? 'occupied' : status === 'RESERVED' ? 'reserved' : 'free'} ${isCombined ? 'combined' : ''}`}
-                        onClick={() => setActiveTableDetail(table)}
-                        style={{
-                          height: 'auto',
-                          minHeight: '140px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                          padding: '1rem',
-                          position: 'relative',
-                          border: isCombined ? '2px solid var(--accent-gold)' : undefined
-                        }}
-                      >
-                        <div>
-                          <div className="table-header" style={{ marginBottom: '0.4rem' }}>
-                            <span className="table-number" style={{ fontSize: '1.15rem' }}>Table T-{table.number}</span>
-                            <span className={`status-badge ${status.toLowerCase()}`}>
-                              ● {status}
-                            </span>
-                          </div>
-
-                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '0.75rem', marginBottom: '0.6rem' }}>
-                            <span><Users size={12} style={{ display: 'inline', verticalAlign: 'middle' }} /> {table.capacity} Seats</span>
-                            <span>{table.location}</span>
-                          </div>
-
-                          {/* Seated Guest Info if Occupied */}
-                          {status === 'OCCUPIED' && table.currentGuest && (
-                            <div style={{ fontSize: '0.78rem', backgroundColor: 'rgba(239, 68, 68, 0.08)', padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239, 68, 68, 0.2)', marginBottom: '0.4rem' }}>
-                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{table.currentGuest.customerName}</div>
-                              <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
-                                Party: {table.currentGuest.partySize} • Since {table.currentGuest.startTime}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Next Reservation if Reserved / Upcoming */}
-                          {table.nextReservation && (
-                            <div style={{ fontSize: '0.78rem', backgroundColor: 'rgba(59, 130, 246, 0.08)', padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
-                              <div style={{ fontWeight: 600, color: '#93c5fd' }}>Next: {table.nextReservation.customerName}</div>
-                              <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
-                                Party: {table.nextReservation.partySize} • {table.nextReservation.startTime} (in {table.nextReservation.startsInMinutes}m)
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Turnover Warning Badge */}
-                        {hasTurnoverWarning && (
-                          <div className="warning-chip" style={{ marginTop: '0.5rem' }}>
-                            <AlertTriangle size={11} /> Next reservation in {table.nextReservation.startsInMinutes}m
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {displayTables.length === 0 && (
-                    <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
-                      No tables currently configured in the floor plan.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right: Operational Alerts */}
-              <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <AlertCircle size={20} style={{ color: 'var(--accent-gold)' }} />
-                  <h3 className="panel-title" style={{ margin: 0 }}>Operational Alerts</h3>
-                </div>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Live alerts derived directly from current reservations and floor state.
-                </span>
-
-                <div className="operational-alerts-container" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '420px', overflowY: 'auto' }}>
-                  {alertsList.map((alert, idx) => {
-                    const isWaitlistAlert = alert.type === 'WAITLIST' || alert.message?.toLowerCase().includes('waitlist') || alert.message?.toLowerCase().includes('waiting');
-                    return (
-                      <div key={idx} className={`operational-alert-card ${alert.severity || 'info'}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-                          {alert.severity === 'warning' ? (
-                            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#fbbf24' }} />
-                          ) : alert.severity === 'success' ? (
-                            <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: '2px', color: 'var(--status-free)' }} />
-                          ) : (
-                            <Info size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#60a5fa' }} />
-                          )}
-                          <div style={{ flex: 1, fontWeight: 500 }}>{alert.message}</div>
-                        </div>
-                        {isWaitlistAlert && (
-                          <div style={{ display: 'flex', gap: '0.5rem', paddingLeft: '1.6rem', marginTop: '0.2rem' }}>
-                            <button 
-                              onClick={() => {
-                                const entry = (operations.waitlist?.entries?.[0] || waitlist[0]);
-                                if (entry) {
-                                  openPromoteModal(entry);
-                                } else {
-                                  setCurrentView('waitlist');
-                                }
-                              }}
-                              className="btn-primary" 
-                              style={{ padding: '0.25rem 0.65rem', fontSize: '0.75rem', backgroundColor: 'var(--status-free)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                            >
-                              <CheckCircle2 size={13} />
-                              Seat Waiting Guest
-                            </button>
-                            <button 
-                              onClick={() => setCurrentView('waitlist')}
-                              className="btn-secondary" 
-                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                            >
-                              Open Waitlist →
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {alertsList.length === 0 && (
-                    <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                      <CheckCircle2 size={28} style={{ color: 'var(--status-free)', margin: '0 auto 0.5rem auto' }} />
-                      All operations normal. No critical alerts requiring host attention.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Full Width Section: Upcoming Reservations Timeline */}
-            <div className="panel-card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Calendar size={20} style={{ color: 'var(--accent-gold)' }} />
-                  <h3 className="panel-title" style={{ margin: 0 }}>Upcoming Reservations Timeline</h3>
-                </div>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  Chronologically ordered by arrival time
-                </span>
-              </div>
-
-              <div className="timeline-list">
-                {upcomingList.map(res => (
-                  <div key={res._id} className="timeline-card">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
-                      <div style={{ minWidth: '90px' }}>
-                        <span style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--accent-gold)' }}>
-                          {res.startTime}
-                        </span>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{res.bookingDate}</div>
-                      </div>
-
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <h4 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0 }}>{res.customerName}</h4>
-                          <span style={{ 
-                            fontSize: '0.7rem', 
-                            padding: '0.1rem 0.45rem', 
-                            borderRadius: 'var(--radius-sm)', 
-                            fontWeight: 700,
-                            backgroundColor: res.status === 'Checked In' ? 'rgba(59,130,246,0.15)' : 'var(--status-free-glow)',
-                            color: res.status === 'Checked In' ? '#3b82f6' : 'var(--status-free)'
-                          }}>
-                            {res.status || 'Confirmed'}
-                          </span>
-                          {res.isEligibleForNoShow && (
-                            <span style={{ 
-                              fontSize: '0.7rem', 
-                              padding: '0.1rem 0.45rem', 
-                              borderRadius: 'var(--radius-sm)', 
-                              fontWeight: 700,
-                              backgroundColor: 'rgba(245,158,11,0.15)',
-                              color: '#fbbf24',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.25rem'
-                            }}>
-                              <AlertTriangle size={11} /> Eligible for No Show
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '1.25rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-                          <span>Party of <strong>{res.partySize}</strong></span>
-                          <span>Table: <strong style={{ color: 'var(--text-primary)' }}>{res.table?.number ? `T-${res.table.number}` : 'Unassigned'}</strong></span>
-                          <span><Phone size={11} style={{ display: 'inline', verticalAlign: 'middle' }} /> {res.contact}</span>
-                          {res.checkedInAt && (
-                            <span style={{ color: '#3b82f6' }}>Checked In: {new Date(res.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {res.status === 'Confirmed' && (
-                        <button 
-                          onClick={() => checkInBooking(res._id)} 
-                          className="btn-secondary"
-                          style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem', color: '#3b82f6', borderColor: 'rgba(59,130,246,0.3)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                        >
-                          <UserCheck size={14} /> Check In
-                        </button>
-                      )}
-
-                      <button 
-                        onClick={() => seatBooking(res._id)} 
-                        className="btn-secondary"
-                        style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', color: 'var(--status-free)', borderColor: 'rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                      >
-                        <UserCheck size={14} /> Seat Guest
-                      </button>
-
-                      {res.isEligibleForNoShow && (
-                        <button 
-                          onClick={() => markNoShow(res._id)} 
-                          className="btn-secondary"
-                          style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem', color: 'var(--status-occupied)', borderColor: 'rgba(239,68,68,0.3)' }}
-                        >
-                          Mark No Show
-                        </button>
-                      )}
-
-                      <button 
-                        onClick={() => cancelBooking(res._id)} 
-                        className="btn-secondary"
-                        style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem', color: 'var(--status-occupied)', borderColor: 'rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                        title="Cancel reservation and free up table slot"
-                      >
-                        <X size={14} /> Cancel / Free Table
-                      </button>
-
-                      <button 
-                        onClick={() => viewAuditTrail(res)} 
-                        className="btn-secondary"
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}
-                        title="View Reservation History"
-                      >
-                        <Clock size={13} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {upcomingList.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    No upcoming reservations scheduled for today.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 4. Full Width Section: Currently Seated Guests */}
-            <div className="panel-card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Users size={20} style={{ color: 'var(--status-occupied)' }} />
-                  <h3 className="panel-title" style={{ margin: 0 }}>Currently Seated Guests</h3>
-                </div>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  Real-time active dining table monitoring
-                </span>
-              </div>
-
-              <div className="seated-grid">
-                {seatedList.map(seated => {
-                  const isLongDining = seated.isLongDining || (seated.durationMinutes && seated.durationMinutes > 90);
-
-                  return (
-                    <div key={seated._id} className="seated-card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--accent-gold)', fontWeight: 700, textTransform: 'uppercase' }}>
-                            Table T-{seated.table?.number || '??'} ({seated.table?.location || 'Dining'})
-                          </span>
-                          <h4 style={{ fontSize: '1.1rem', fontWeight: 600, marginTop: '0.2rem' }}>
-                            {seated.customerName}
-                          </h4>
-                        </div>
-                        <span className="duration-pill" style={{ backgroundColor: isLongDining ? 'rgba(239,68,68,0.2)' : undefined, color: isLongDining ? 'var(--status-occupied)' : undefined }}>
-                          <Timer size={12} /> {seated.durationMinutes} min
-                        </span>
-                      </div>
-
-                      {isLongDining && (
-                        <div style={{ fontSize: '0.72rem', color: 'var(--status-occupied)', backgroundColor: 'rgba(239,68,68,0.08)', padding: '0.25rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239,68,68,0.2)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                          <AlertTriangle size={11} /> Table occupied for &gt;90 minutes
-                        </div>
-                      )}
-
-                      <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                        <div>Party: <strong>{seated.partySize} guests</strong></div>
-                        <div>Seated since: <strong>{seated.startTime}</strong></div>
-                        <div>Contact: {seated.contact}</div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                        <button 
-                          onClick={() => completeBooking(seated._id)} 
-                          className="btn-primary"
-                          style={{ flex: 1, padding: '0.45rem', fontSize: '0.82rem', backgroundColor: 'var(--status-free)' }}
-                        >
-                          <CheckCircle2 size={14} style={{ marginRight: '4px' }} /> Free Table / Complete
-                        </button>
-                        <button 
-                          onClick={() => viewAuditTrail(seated)} 
-                          className="btn-secondary"
-                          style={{ padding: '0.45rem', fontSize: '0.82rem' }}
-                          title="View Reservation History"
-                        >
-                          <Clock size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {seatedList.length === 0 && (
-                  <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    No guests currently seated.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 5. Split Section: Waitlist Intelligence (Left) + Smart Seating Assistant (Right) */}
-            <div className="grid-layout" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-              
-              {/* Waitlist Intelligence */}
-              <div className="panel-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Clock size={18} style={{ color: 'var(--status-waitlist)' }} />
-                    <h3 className="panel-title" style={{ margin: 0 }}>Waiting List</h3>
-                  </div>
-                  <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: 'var(--radius-full)', backgroundColor: 'var(--status-waitlist-glow)', color: 'var(--status-waitlist)', fontWeight: 600 }}>
-                    {operations.waitlist?.total ?? waitlist.length} Waiting
-                  </span>
-                </div>
-
-                <div className="timeline-list">
-                  {(operations.waitlist?.entries?.length > 0 ? operations.waitlist.entries : waitlist).map((entry, idx) => (
-                    <div key={entry._id} className="timeline-card" style={{ padding: '0.85rem 1rem' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ color: 'var(--accent-gold)', fontWeight: 700, fontSize: '0.95rem' }}>
-                            #{entry.position || idx + 1}
-                          </span>
-                          <span style={{ fontWeight: 600 }}>{entry.customerName}</span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            • Party of {entry.partySize}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                          Waiting: <strong>{entry.waitingDurationMinutes ?? 0} min</strong> • Contact: {entry.contact}
-                        </div>
-                        {entry.suggestedTable && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--status-free)', marginTop: '0.2rem' }}>
-                            Suggested: <strong>Table T-{entry.suggestedTable.number}</strong> ({entry.suggestedTable.capacity} seats)
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <button 
-                          onClick={() => openPromoteModal(entry)} 
-                          className="btn-primary"
-                          style={{ padding: '0.35rem 0.75rem', fontSize: '0.78rem', backgroundColor: 'var(--status-free)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                          title="Confirm and seat guest at an available table"
-                        >
-                          <CheckCircle2 size={14} />
-                          Confirm & Seat
-                        </button>
-                        <button 
-                          onClick={() => deleteWaitlist(entry._id)} 
-                          className="btn-secondary" 
-                          style={{ padding: '0.35rem 0.6rem', color: 'var(--status-occupied)', borderColor: 'rgba(239, 68, 68, 0.3)', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                          title="Cancel and remove from waitlist"
-                        >
-                          <Trash2 size={13} />
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {(operations.waitlist?.entries?.length === 0 || (!operations.waitlist?.entries && waitlist.length === 0)) && (
-                    <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                      Waitlist is currently empty.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Smart Seating Assistant */}
-              <div className="panel-card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <GitMerge size={18} style={{ color: 'var(--accent-gold)' }} />
-                  <h3 className="panel-title" style={{ margin: 0 }}>Smart Seating Assistant</h3>
-                </div>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '1rem' }}>
-                  Smart seating assistant for optimal large-party table combinations with minimal capacity waste.
-                </span>
-
-                <form onSubmit={handleCombine} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem' }}>Party Size</label>
-                      <input 
-                        type="number" 
-                        className="form-input" 
-                        placeholder="e.g. 6" 
-                        value={partySize} 
-                        onChange={(e) => {
-                          setPartySize(e.target.value);
-                          setCombineError('');
-                        }}
-                        min="1"
-                        required
-                        style={{ padding: '0.45rem 0.65rem' }}
-                      />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem' }}>Date</label>
-                      <input 
-                        type="date" 
-                        className="form-input" 
-                        value={combineDate} 
-                        onChange={(e) => {
-                          setCombineDate(e.target.value);
-                          setCombineError('');
-                        }}
-                        required
-                        style={{ padding: '0.45rem 0.65rem' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem' }}>Start Time</label>
-                      <input 
-                        type="time" 
-                        className="form-input" 
-                        value={combineStart} 
-                        onChange={(e) => handleCombineStartChange(e.target.value)}
-                        required
-                        style={{ padding: '0.45rem 0.65rem' }}
-                      />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem' }}>End Time</label>
-                      <input 
-                        type="time" 
-                        className="form-input" 
-                        value={combineEnd} 
-                        onChange={(e) => {
-                          setCombineEnd(e.target.value);
-                          setCombineError('');
-                        }}
-                        required
-                        style={{ padding: '0.45rem 0.65rem' }}
-                      />
-                    </div>
-                  </div>
-
-                  {combineError && (
-                    <div style={{ padding: '0.65rem 0.85rem', backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 'var(--radius-sm)', color: '#fca5a5', fontSize: '0.8rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginTop: '0.25rem', lineHeight: '1.4' }}>
-                      <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: '2px', color: '#f87171' }} />
-                      <span>{combineError}</span>
-                    </div>
-                  )}
-
-                  <button 
-                    type="submit" 
-                    className="btn-primary" 
-                    disabled={combining}
-                    style={{ padding: '0.55rem', fontSize: '0.85rem', marginTop: '0.25rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.4rem' }}
-                  >
-                    <Sparkles size={14} className={combining ? 'spin-animation' : ''} />
-                    {combining ? 'Finding Best Combination...' : 'Find Smart Seating Combination'}
-                  </button>
-                </form>
-
-                {combineResult && (
-                  <div style={{ border: '1px solid var(--accent-gold)', backgroundColor: 'rgba(217, 119, 6, 0.08)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <span className="match-badge-best">★ Best Match</span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--accent-gold)', fontWeight: 600 }}>
-                        {combineResult.count} Tables Combined
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
-                      {combineResult.tables.map(t => `Table T-${t.number} (${t.capacity}s)`).join(' + ')}
-                    </div>
-
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                      Total Combined Capacity: <strong style={{ color: 'var(--accent-gold)' }}>{combineResult.totalCapacity} seats</strong> (Party of {combineResult.partySize})
-                      <br />
-                      Unused Capacity: <strong>{combineResult.unusedCapacity} seats</strong> (Optimal Backtracking Solution)
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-                      <button 
-                        onClick={() => {
-                          setCurrentView('floor');
-                        }}
-                        className="btn-primary"
-                        style={{ flex: 1, fontSize: '0.78rem', padding: '0.4rem', backgroundColor: 'var(--accent-gold)' }}
-                      >
-                        Highlight on Floor Plan →
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setCombinedTables([]);
-                          setCombineResult(null);
-                          setCombineError('');
-                        }}
-                        className="btn-secondary"
-                        style={{ padding: '0.4rem 0.6rem', fontSize: '0.78rem' }}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-          </div>
+          <DashboardView
+            operations={operations}
+            tables={tables}
+            bookings={bookings}
+            waitlist={waitlist}
+            currentTime={currentTime}
+            isRefreshing={isRefreshing}
+            fetchData={fetchData}
+            completeBooking={completeBooking}
+            checkInBooking={checkInBooking}
+            seatBooking={seatBooking}
+            markNoShow={markNoShow}
+            cancelBooking={cancelBooking}
+            viewAuditTrail={viewAuditTrail}
+            openPromoteModal={openPromoteModal}
+            navigateToView={navigateToView}
+            setActiveTableDetail={setActiveTableDetail}
+          />
         )}
 
         {/* ==========================================
-           VIEW: FLOOR PLAN (ORIGINAL + ENHANCED)
+           VIEW: FLOOR PLAN (PHASE UI-2 STITCH MIGRATION)
            ========================================== */}
         {currentView === 'floor' && (
-          <div className="grid-layout" style={{ gridTemplateColumns: '1.2fr 0.8fr' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-              
-              {/* Table Floor Grid */}
-              <div className="panel-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <h3 className="panel-title" style={{ margin: 0 }}>Floor Plan</h3>
-                  <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem' }}>
-                    <span className="status-badge available">● Free</span>
-                    <span className="status-badge occupied">● Occupied</span>
-                    <span className="status-badge reserved">● Reserved</span>
-                  </div>
-                </div>
+          <FloorPlanView
+            displayTables={displayTables}
+            tables={tables}
+            bookings={bookings}
+            operations={operations}
+            combinedTables={combinedTables}
+            combineResult={combineResult}
+            combineCapacity={combineCapacity}
+            partySize={partySize}
+            setPartySize={setPartySize}
+            combineDate={combineDate}
+            setCombineDate={setCombineDate}
+            combineStart={combineStart}
+            setCombineStart={setCombineStart}
+            combineEnd={combineEnd}
+            setCombineEnd={setCombineEnd}
+            handleCombineStartChange={handleCombineStartChange}
+            handleCombine={handleCombine}
+            combining={combining}
+            combineError={combineError}
+            setCombineError={setCombineError}
+            setCombinedTables={setCombinedTables}
+            setCombineResult={setCombineResult}
+            setCombineCapacity={setCombineCapacity}
+            selectedWaitlistEntry={selectedWaitlistEntry}
+            setSelectedWaitlistEntry={setSelectedWaitlistEntry}
+            promoteWaitlistEntry={promoteWaitlistEntry}
+            activeTableDetail={activeTableDetail}
+            setActiveTableDetail={setActiveTableDetail}
+            handleDeleteTable={handleDeleteTable}
+            toggleOccupied={toggleOccupied}
+            completeBooking={completeBooking}
+            checkInBooking={checkInBooking}
+            seatBooking={seatBooking}
+            cancelBooking={cancelBooking}
+            viewAuditTrail={viewAuditTrail}
+            getCurrentBooking={getCurrentBooking}
+            getTableReservations={getTableReservations}
+            currentTime={currentTime}
+            isRefreshing={isRefreshing}
+            fetchData={fetchData}
+            API_BASE={API_BASE}
+            getAuthHeaders={getAuthHeaders}
+          />
+        )}
 
-                {combinedTables.length > 0 && combineResult && (
-                  <div style={{ padding: '0.75rem 1rem', backgroundColor: 'rgba(217, 119, 6, 0.12)', border: '1px solid var(--accent-gold)', borderRadius: 'var(--radius-md)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Sparkles size={16} style={{ color: 'var(--accent-gold)' }} />
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>
-                        Combination Highlighted: <strong>{combineResult.tables.map(t => `T-${t.number}`).join(' + ')}</strong> (Capacity: {combineResult.totalCapacity} for {combineResult.partySize} guests)
-                      </span>
-                    </div>
-                    <button 
-                      onClick={() => {
-                        setCombinedTables([]);
-                        setCombineResult(null);
-                      }}
-                      className="btn-secondary"
-                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                    >
-                      Clear Highlight
-                    </button>
-                  </div>
-                )}
-
-                {selectedWaitlistEntry && (
-                  <div style={{ border: '1px solid var(--border-gold)', backgroundColor: 'rgba(217,119,6,0.05)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.9rem' }}>
-                      Select an unoccupied table to seat <strong>{selectedWaitlistEntry.customerName}</strong> (Party size: {selectedWaitlistEntry.partySize})
-                    </span>
-                    <button onClick={() => setSelectedWaitlistEntry(null)} className="btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
-                      Cancel
-                    </button>
-                  </div>
-                )}
-
-                <div className="floor-grid">
-                  {displayTables.map(table => {
-                    const isCombined = combinedTables.includes(table._id);
-                    const status = table.operationalStatus || (table.isOccupied ? 'OCCUPIED' : 'AVAILABLE');
-
-                    return (
-                      <div 
-                        key={table._id}
-                        className={`table-node ${status === 'OCCUPIED' ? 'occupied' : status === 'RESERVED' ? 'reserved' : 'free'} ${isCombined ? 'combined' : ''}`}
-                        onClick={async () => {
-                          if (selectedWaitlistEntry) {
-                            if (table.isOccupied) {
-                              const activeBooking = bookings.find(b => 
-                                (b.tableId?._id === table._id || b.tableId === table._id) && 
-                                (b.status === 'Confirmed' || b.status === 'Seated')
-                              );
-                              const customerLabel = activeBooking ? `occupied by ${activeBooking.customerName}` : 'occupied';
-                              if (window.confirm(`Table T-${table.number} is currently ${customerLabel}. Would you like to complete their booking and seat ${selectedWaitlistEntry.customerName} here?`)) {
-                                if (activeBooking) {
-                                  await fetch(`${API_BASE}/bookings/${activeBooking._id}`, {
-                                    method: 'PUT',
-                                    headers: getAuthHeaders(),
-                                    body: JSON.stringify({ status: 'Completed' })
-                                  });
-                                }
-                                promoteWaitlistEntry(table._id);
-                              }
-                            } else if (table.capacity < selectedWaitlistEntry.partySize) {
-                              if (window.confirm(`Warning: This table capacity (${table.capacity}) is smaller than waitlisted party size (${selectedWaitlistEntry.partySize}). Do you still want to seat them here?`)) {
-                                promoteWaitlistEntry(table._id);
-                              }
-                            } else {
-                              promoteWaitlistEntry(table._id);
-                            }
-                          } else {
-                            setActiveTableDetail(table);
-                          }
-                        }}
-                      >
-                        <div className="table-header">
-                          <span className="table-number">T-{table.number}</span>
-                          <span className="table-status-dot"></span>
-                        </div>
-                        <div style={{ marginTop: '0.5rem' }}>
-                          <span className="table-capacity">
-                            <Users size={12} /> Cap: {table.capacity}
-                          </span>
-                          <span className="table-location">{table.location}</span>
-                        </div>
-                        <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', fontWeight: 600 }}>
-                          <span className={`status-badge ${status.toLowerCase()}`}>
-                            {status}
-                          </span>
-                        </div>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteTable(table._id);
-                          }}
-                          style={{ position: 'absolute', right: '8px', bottom: '8px', border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                          title="Delete Table"
-                        >
-                          <Trash2 size={12} className="hover-red" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {displayTables.length === 0 && (
-                    <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
-                      No tables added. Add tables from the Tables tab.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Table Combiner Solver */}
-              <div className="panel-card">
-                <h3 className="panel-title">
-                  <GitMerge size={20} className="logo-icon" />
-                  Smart Seating Assistant
+        {/* ==========================================
+           VIEW: BOOKINGS (STITCH UNIFIED RESERVATIONS)
+           ========================================== */}
+        {currentView === 'bookings' && (
+          <div className="panel-card" style={{ padding: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0, fontFamily: 'Geist, sans-serif' }}>
+                  Upcoming Reservations
                 </h3>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '1.25rem' }}>
-                  Finds the minimum combination of free tables required to seat a large party, minimizing wasted space.
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Confirmed guest bookings and active table assignments for today's service.
                 </span>
-
-                <form onSubmit={handleCombine} style={{ marginBottom: '1rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.9fr 0.9fr', gap: '1rem', marginBottom: '1.25rem', alignItems: 'flex-end' }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Large Party Size</label>
-                      <input 
-                        type="number" 
-                        className="form-input" 
-                        placeholder="e.g. 8" 
-                        value={partySize} 
-                        onChange={(e) => setPartySize(e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Date</label>
-                      <input 
-                        type="date" 
-                        className="form-input" 
-                        value={combineDate} 
-                        onChange={(e) => setCombineDate(e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Start Time</label>
-                      <input 
-                        type="time" 
-                        className="form-input" 
-                        value={combineStart} 
-                        onChange={(e) => setCombineStart(e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">End Time</label>
-                      <input 
-                        type="time" 
-                        className="form-input" 
-                        value={combineEnd} 
-                        onChange={(e) => setCombineEnd(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-                    {combinedTables.length > 0 && (
-                      <button 
-                        type="button" 
-                        className="btn-secondary" 
-                        onClick={() => {
-                          setCombinedTables([]);
-                          setCombineCapacity(0);
-                          setPartySize('');
-                          setCombineResult(null);
-                        }}
-                        style={{ width: 'auto' }}
-                      >
-                        Clear Highlights
-                      </button>
-                    )}
-                    <button type="submit" className="btn-primary" style={{ width: 'auto' }} disabled={combining}>
-                       {combining ? 'Finding table combinations...' : 'Run Solver'}
-                    </button>
-                  </div>
-                </form>
-
-                {combinedTables.length > 0 && (
-                  <div style={{ border: '1px solid rgba(245, 158, 11, 0.4)', backgroundColor: 'rgba(245,158,11,0.05)', padding: '1rem', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h4 style={{ color: 'var(--status-waitlist)', fontWeight: 600 }}>Optimal Combination Found</h4>
-                      <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                        Combine the highlighted tables. Total capacity: <strong>{combineCapacity} seats</strong>.
-                      </p>
-                    </div>
-                  </div>
-                )}
               </div>
+              <span style={{ fontFamily: 'Geist, monospace', fontSize: '0.88rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                {bookings.length} Total
+              </span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-              {/* Table Details / Seating Drawer Panel */}
-              {activeTableDetail ? (() => {
-                const currentBooking = getCurrentBooking(activeTableDetail._id);
-                const allRes = getTableReservations(activeTableDetail._id);
-                const upcomingRes = allRes.filter(b => b._id !== currentBooking?._id);
-                const tableStatus = activeTableDetail.operationalStatus || (activeTableDetail.isOccupied ? 'OCCUPIED' : 'AVAILABLE');
-
-                return (
-                  <div className="panel-card" style={{ border: '1px solid var(--border-gold)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                      <h3 className="panel-title" style={{ margin: 0 }}>
-                        Table T-{activeTableDetail.number} Details
-                      </h3>
-                      <button onClick={() => setActiveTableDetail(null)} className="btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}>
-                        Close
-                      </button>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.9rem', marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
-                      <div>Capacity: <strong>{activeTableDetail.capacity} seats</strong></div>
-                      <div>Seating Zone: <strong>{activeTableDetail.location}</strong></div>
-                      <div>Table Rating: <strong>★ {activeTableDetail.rating}</strong></div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        Operational State: <span className={`status-badge ${tableStatus.toLowerCase()}`}>
-                          ● {tableStatus}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Current Seating status */}
-                    <div style={{ padding: '1rem', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem' }}>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem', fontWeight: 600, letterSpacing: '0.05em' }}>
-                        CURRENT STATUS
-                      </span>
-                      {currentBooking ? (
-                        <div>
-                          <h4 style={{ color: 'var(--accent-gold)', margin: 0, fontSize: '0.95rem' }}>SEATED RESERVATION</h4>
-                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', lineHeight: '1.4' }}>
-                            Guest: <strong>{currentBooking.customerName}</strong> ({currentBooking.partySize} guests)
-                            <br />
-                            Contact: {currentBooking.contact}
-                            <br />
-                            Time: <strong>{currentBooking.startTime} – {currentBooking.endTime}</strong>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="stitch-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '22%' }}>Guest</th>
+                    <th style={{ width: '18%' }}>Time & Date</th>
+                    <th style={{ width: '10%' }}>Party</th>
+                    <th style={{ width: '14%' }}>Table</th>
+                    <th style={{ width: '14%' }}>Status</th>
+                    <th style={{ width: '22%', textAlign: 'right' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bookings.map(booking => {
+                    const statusClass = booking.status.toLowerCase().replace(/\s+/g, '-');
+                    return (
+                      <tr key={booking._id}>
+                        <td>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{booking.customerName}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{booking.contact}</div>
+                        </td>
+                        <td>
+                          <div style={{ fontFamily: 'Geist, monospace', fontSize: '0.85rem', fontWeight: 600 }}>
+                            {booking.startTime} – {booking.endTime}
                           </div>
-                          <button 
-                            onClick={() => completeBooking(currentBooking._id)} 
-                            className="btn-primary" 
-                            style={{ marginTop: '0.75rem', width: '100%', backgroundColor: 'var(--status-free)' }}
-                          >
-                            Complete Seating
-                          </button>
-                        </div>
-                      ) : (
-                        <div>
-                          <h4 style={{ color: 'var(--status-free)', margin: 0, fontSize: '0.95rem' }}>AVAILABLE NOW</h4>
-                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.25rem 0 0.75rem 0' }}>
-                            No active booking covers the current time slot.
-                          </p>
-                          <button 
-                            onClick={() => toggleOccupied(activeTableDetail)} 
-                            className="btn-secondary" 
-                            style={{ width: '100%' }}
-                          >
-                            {activeTableDetail.isOccupied ? 'Mark Physically Vacant' : 'Mark Physically Occupied (Walk-in)'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Upcoming Reservations */}
-                    <div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem', fontWeight: 600, letterSpacing: '0.05em' }}>
-                        UPCOMING RESERVATIONS
-                      </span>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        {upcomingRes.map(res => (
-                          <div key={res._id} style={{ padding: '0.65rem 0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', backgroundColor: 'var(--bg-secondary)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 600 }}>
-                              <span>{res.customerName}</span>
-                              <span style={{ color: 'var(--accent-gold)' }}>{res.startTime}</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                              <span>Guests: {res.partySize} • {res.status}</span>
-                              <span>Date: {res.bookingDate}</span>
-                            </div>
-                            <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                              {res.status === 'Confirmed' && (
-                                <button 
-                                  onClick={() => checkInBooking(res._id)} 
-                                  className="btn-secondary" 
-                                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', color: '#3b82f6' }}
-                                >
-                                  Check In
-                                </button>
-                              )}
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{booking.bookingDate}</div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontFamily: 'Geist, monospace', fontWeight: 600 }}>
+                            <Users size={13} style={{ color: 'var(--text-muted)' }} />
+                            <span>{booking.partySize}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span style={{ fontFamily: 'Geist, monospace', fontSize: '0.85rem', fontWeight: 600 }}>
+                            {booking.tableId ? `Table T-${booking.tableId.number}` : 'Unassigned'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`stitch-badge ${statusClass}`} style={{ textTransform: 'uppercase', fontSize: '0.7rem', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}>
+                            {booking.status}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', justifyContent: 'flex-end' }}>
+                            {booking.status === 'Confirmed' && (
                               <button 
-                                onClick={() => seatBooking(res._id)} 
-                                className="btn-secondary" 
-                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', color: 'var(--status-free)' }}
+                                onClick={() => checkInBooking(booking._id)} 
+                                className="stitch-action-btn primary"
+                                style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}
+                              >
+                                Check In
+                              </button>
+                            )}
+                            {(booking.status === 'Confirmed' || booking.status === 'Checked In') && (
+                              <button 
+                                onClick={() => seatBooking(booking._id)} 
+                                className="stitch-action-btn primary"
+                                style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}
                               >
                                 Seat
                               </button>
+                            )}
+                            {booking.status === 'Seated' && (
                               <button 
-                                onClick={() => cancelBooking(res._id)} 
-                                className="btn-secondary" 
-                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', color: 'var(--status-occupied)' }}
+                                onClick={() => completeBooking(booking._id)} 
+                                className="stitch-action-btn primary"
+                                style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', backgroundColor: 'var(--status-free)', borderColor: 'var(--status-free)', color: '#FFFFFF' }}
+                              >
+                                Complete
+                              </button>
+                            )}
+                            {(booking.status === 'Confirmed' || booking.status === 'Checked In') && (
+                              <button 
+                                onClick={() => markNoShow(booking._id)} 
+                                className="stitch-action-btn secondary"
+                                style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', color: 'var(--status-occupied)' }}
+                                title="Mark reservation as no-show"
+                              >
+                                No Show
+                              </button>
+                            )}
+                            {['Confirmed', 'Checked In', 'Seated'].includes(booking.status) && (
+                              <button 
+                                onClick={() => cancelBooking(booking._id)} 
+                                className="stitch-action-btn secondary"
+                                style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', color: 'var(--status-occupied)' }}
                                 title="Cancel reservation and free up table slot"
                               >
-                                Cancel / Free Table
+                                Cancel
                               </button>
-                            </div>
+                            )}
+                            <button 
+                              onClick={() => viewAuditTrail(booking)} 
+                              className="stitch-action-btn secondary"
+                              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                              title="View Audit Trail"
+                            >
+                              <Clock size={13} />
+                            </button>
                           </div>
-                        ))}
-                        {upcomingRes.length === 0 && (
-                          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                            No upcoming reservations today.
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
 
-                    {/* Promote waitlist action */}
-                    {selectedWaitlistEntry && (
-                      <div style={{ marginTop: '1.5rem', padding: '1rem', backgroundColor: 'rgba(217,119,6,0.05)', border: '1px solid var(--border-gold)', borderRadius: 'var(--radius-md)' }}>
-                        <span style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.75rem' }}>
-                          Seat waitlisted guest <strong>{selectedWaitlistEntry.customerName}</strong> (Party size: {selectedWaitlistEntry.partySize}) at this table?
-                        </span>
-                        <button 
-                          onClick={() => promoteWaitlistEntry(activeTableDetail._id)} 
-                          className="btn-primary" 
-                          style={{ width: '100%', backgroundColor: 'var(--accent-gold)' }}
-                        >
-                          Seat Guest
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })() : (
-                <div className="panel-card">
-                  <h3 className="panel-title">Seating Selections</h3>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    Click any table on the interactive floor plan to view details, toggle physical walk-in status, or review upcoming bookings.
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ==========================================
-           VIEW: BOOKINGS (ALL BOOKINGS AUDIT)
-           ========================================== */}
-        {currentView === 'bookings' && (
-          <div className="panel-card" style={{ maxWidth: '900px' }}>
-            <h3 className="panel-title">All Reservations Registry</h3>
-            <div className="bookings-list" style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {bookings.map(booking => (
-                <div key={booking._id} className="booking-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-                  <div className="booking-details" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <h4 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{booking.customerName}</h4>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-                      <span>Table: <strong>{booking.tableId ? `T-${booking.tableId.number}` : 'Unassigned'}</strong></span>
-                      <span>Guests: <strong>{booking.partySize}</strong></span>
-                      <span>Date: <strong>{booking.bookingDate}</strong></span>
-                      <span>Time: <strong>{booking.startTime} – {booking.endTime}</strong></span>
-                      <span>Status: <strong style={{ 
-                        color: booking.status === 'Seated' ? 'var(--accent-gold)' : 
-                               booking.status === 'Checked In' ? '#3b82f6' :
-                               booking.status === 'Confirmed' ? 'var(--status-free)' : 
-                               booking.status === 'Completed' ? '#10b981' : 'var(--status-occupied)' 
-                      }}>{booking.status}</strong></span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    {booking.status === 'Confirmed' && (
-                      <button 
-                        onClick={() => checkInBooking(booking._id)} 
-                        className="btn-secondary" 
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', color: '#3b82f6', borderColor: 'rgba(59,130,246,0.3)' }}
-                      >
-                        Check In
-                      </button>
-                    )}
-                    {(booking.status === 'Confirmed' || booking.status === 'Checked In') && (
-                      <button 
-                        onClick={() => seatBooking(booking._id)} 
-                        className="btn-secondary" 
-                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', color: 'var(--accent-gold)', borderColor: 'var(--accent-gold)' }}
-                      >
-                        Seat Guest
-                      </button>
-                    )}
-                    {booking.status === 'Seated' && (
-                      <button 
-                        onClick={() => completeBooking(booking._id)} 
-                        className="btn-secondary" 
-                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', color: 'var(--status-free)', borderColor: 'rgba(16, 185, 129, 0.3)' }}
-                      >
-                        <CheckCircle2 size={14} style={{ marginRight: '4px' }} />
-                        Complete
-                      </button>
-                    )}
-                    {['Confirmed', 'Checked In', 'Seated'].includes(booking.status) && (
-                      <button 
-                        onClick={() => cancelBooking(booking._id)} 
-                        className="btn-secondary" 
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', color: 'var(--status-occupied)', borderColor: 'rgba(239,68,68,0.3)' }}
-                        title="Cancel this reservation and release table"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => viewAuditTrail(booking)} 
-                      className="btn-secondary" 
-                      style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
-                      title="View Reservation History"
-                    >
-                      <Clock size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
               {bookings.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)' }}>
-                  No reservations found in database.
+                <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                  No reservations on file.
                 </div>
               )}
             </div>
@@ -1998,27 +916,29 @@ export default function ManagementPortal() {
           });
 
           return (
-            <div className="panel-card" style={{ maxWidth: '1050px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="panel-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div>
-                  <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-                    <Clock size={22} className="logo-icon" />
-                    Reservation History
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0, fontFamily: 'Geist, sans-serif' }}>
+                    Master Reservation History & Audit Trail
                   </h3>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    Complete activity and reservation history of all confirmed, completed, cancelled, and no-show bookings.
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Chronological activity log of all confirmed, completed, cancelled, and no-show reservations.
                   </span>
                 </div>
+                <span style={{ fontFamily: 'Geist, monospace', fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  {filteredHistory.length} Records
+                </span>
               </div>
 
               {/* Filters Bar */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '1rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '0.85rem', marginBottom: '1.25rem', alignItems: 'center' }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.78rem' }}>Search Guest / Table</label>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Search Guest / Table</label>
                   <input 
                     type="text" 
                     className="form-input" 
-                    placeholder="Search by customer name, phone, or table..." 
+                    placeholder="Search by name, contact, or table..." 
                     value={historyFilterSearch} 
                     onChange={(e) => setHistoryFilterSearch(e.target.value)}
                     style={{ padding: '0.45rem 0.65rem', fontSize: '0.85rem' }}
@@ -2026,7 +946,7 @@ export default function ManagementPortal() {
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.78rem' }}>Filter by Status</label>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Filter by Status</label>
                   <select 
                     className="form-select" 
                     value={historyFilterStatus} 
@@ -2044,7 +964,7 @@ export default function ManagementPortal() {
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.78rem' }}>Filter by Date</label>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Filter by Date</label>
                   <input 
                     type="date" 
                     className="form-input" 
@@ -2065,77 +985,59 @@ export default function ManagementPortal() {
 
               {/* History Table */}
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+                <table className="stitch-table">
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '0.75rem 0.5rem' }}>Customer</th>
-                      <th style={{ padding: '0.75rem 0.5rem' }}>Table</th>
-                      <th style={{ padding: '0.75rem 0.5rem' }}>Date & Time</th>
-                      <th style={{ padding: '0.75rem 0.5rem' }}>Party</th>
-                      <th style={{ padding: '0.75rem 0.5rem' }}>Status</th>
-                      <th style={{ padding: '0.75rem 0.5rem' }}>Reservation Timeline</th>
-                      <th style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>History</th>
+                    <tr>
+                      <th style={{ width: '22%' }}>Customer</th>
+                      <th style={{ width: '14%' }}>Table</th>
+                      <th style={{ width: '18%' }}>Date & Time</th>
+                      <th style={{ width: '10%' }}>Party</th>
+                      <th style={{ width: '14%' }}>Status</th>
+                      <th style={{ width: '14%' }}>Timeline</th>
+                      <th style={{ width: '8%', textAlign: 'right' }}>Audit</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredHistory.map(b => {
-                      let badgeBg = 'var(--status-free-glow)';
-                      let badgeColor = 'var(--status-free)';
-                      if (b.status === 'Checked In') {
-                        badgeBg = 'rgba(59, 130, 246, 0.15)';
-                        badgeColor = '#3b82f6';
-                      } else if (b.status === 'Seated') {
-                        badgeBg = 'var(--accent-gold-glow)';
-                        badgeColor = 'var(--accent-gold)';
-                      } else if (b.status === 'Completed') {
-                        badgeBg = 'rgba(16, 185, 129, 0.15)';
-                        badgeColor = '#10b981';
-                      } else if (b.status === 'Cancelled' || b.status === 'No Show') {
-                        badgeBg = 'rgba(239, 68, 68, 0.15)';
-                        badgeColor = 'var(--status-occupied)';
-                      }
-
+                      const statusClass = b.status.toLowerCase().replace(/\s+/g, '-');
                       return (
-                        <tr key={b._id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <td style={{ padding: '0.75rem 0.5rem' }}>
+                        <tr key={b._id}>
+                          <td>
                             <div style={{ fontWeight: 600 }}>{b.customerName}</div>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{b.contact}</div>
                           </td>
-                          <td style={{ padding: '0.75rem 0.5rem' }}>
-                            {b.tableId?.number ? `Table T-${b.tableId.number}` : 'Unassigned'}
+                          <td>
+                            <span style={{ fontFamily: 'Geist, monospace', fontSize: '0.85rem', fontWeight: 600 }}>
+                              {b.tableId?.number ? `Table T-${b.tableId.number}` : 'Unassigned'}
+                            </span>
                           </td>
-                          <td style={{ padding: '0.75rem 0.5rem' }}>
-                            <div>{b.bookingDate}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{b.startTime} - {b.endTime}</div>
+                          <td>
+                            <div style={{ fontFamily: 'Geist, monospace', fontSize: '0.85rem' }}>{b.bookingDate}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'Geist, monospace' }}>{b.startTime} - {b.endTime}</div>
                           </td>
-                          <td style={{ padding: '0.75rem 0.5rem' }}>{b.partySize} guests</td>
-                          <td style={{ padding: '0.75rem 0.5rem' }}>
-                            <span style={{ 
-                              fontSize: '0.75rem', 
-                              padding: '0.15rem 0.5rem', 
-                              borderRadius: 'var(--radius-sm)', 
-                              fontWeight: 700,
-                              backgroundColor: badgeBg,
-                              color: badgeColor
-                            }}>
+                          <td>
+                            <span style={{ fontFamily: 'Geist, monospace', fontWeight: 600 }}>{b.partySize}</span>
+                          </td>
+                          <td>
+                            <span className={`stitch-badge ${statusClass}`} style={{ textTransform: 'uppercase', fontSize: '0.7rem', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}>
                               {b.status}
                             </span>
                           </td>
-                          <td style={{ padding: '0.75rem 0.5rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          <td style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                             {b.checkedInAt && <div>Checked in: {new Date(b.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
                             {b.seatedAt && <div>Seated: {new Date(b.seatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
                             {b.completedAt && <div>Completed: {new Date(b.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
                             {b.noShowAt && <div style={{ color: 'var(--status-occupied)' }}>No Show: {new Date(b.noShowAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
                             {b.cancelledAt && <div style={{ color: 'var(--status-occupied)' }}>Cancelled: {new Date(b.cancelledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
                           </td>
-                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>
+                          <td style={{ textAlign: 'right' }}>
                             <button 
                               onClick={() => viewAuditTrail(b)} 
-                              className="btn-secondary" 
-                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                              className="stitch-action-btn secondary"
+                              style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
+                              title="View full audit trail"
                             >
                               <Clock size={13} />
-                              History
                             </button>
                           </td>
                         </tr>
@@ -2155,187 +1057,82 @@ export default function ManagementPortal() {
         })()}
 
         {/* ==========================================
-           VIEW: WAITLIST
+           VIEW: WAITLIST & SMART SEATING (PHASE UI-3 STITCH MIGRATION)
            ========================================== */}
-        {currentView === 'waitlist' && (
-          <div className="panel-card" style={{ maxWidth: '920px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-              <div>
-                <h3 className="panel-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Clock size={20} style={{ color: 'var(--status-waitlist)' }} />
-                  Live Waiting List Management
-                </h3>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
-                  Confirm seating for waiting guests at available tables, or cancel entries.
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '0.85rem', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-full)', backgroundColor: 'var(--status-waitlist-glow)', color: 'var(--status-waitlist)', fontWeight: 600 }}>
-                  {operations.waitlist?.total ?? waitlist.length} in Queue
-                </span>
-                <button 
-                  onClick={fetchData}
-                  className="btn-secondary"
-                  style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                >
-                  <RotateCw size={13} className={isRefreshing ? 'spin-animation' : ''} />
-                  Refresh
-                </button>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {(operations.waitlist?.entries?.length > 0 ? operations.waitlist.entries : waitlist).map((entry, idx) => {
-                const availableForParty = tables.filter(t => !t.isOccupied && t.capacity >= entry.partySize);
-                return (
-                  <div 
-                    key={entry._id} 
-                    className="panel-card"
-                    style={{ 
-                      backgroundColor: 'var(--bg-tertiary)', 
-                      border: '1px solid var(--border-color)',
-                      padding: '1.25rem',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '1rem'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div style={{ 
-                          width: '38px', 
-                          height: '38px', 
-                          borderRadius: 'var(--radius-full)', 
-                          backgroundColor: 'var(--accent-gold-glow)', 
-                          color: 'var(--accent-gold)', 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          justifyContent: 'center', 
-                          fontWeight: 700,
-                          fontSize: '1.05rem',
-                          flexShrink: 0
-                        }}>
-                          #{entry.position || idx + 1}
-                        </div>
-                        <div>
-                          <h4 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600 }}>{entry.customerName}</h4>
-                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', gap: '1rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-                            <span>Party of <strong style={{ color: 'var(--text-primary)' }}>{entry.partySize} guests</strong></span>
-                            <span>Phone: <strong style={{ color: 'var(--text-primary)' }}>{entry.contact}</strong></span>
-                            <span>Waiting: <strong style={{ color: 'var(--status-waitlist)' }}>{entry.waitingDurationMinutes ?? 0} min</strong></span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                        <button 
-                          onClick={() => openPromoteModal(entry)} 
-                          className="btn-primary"
-                          style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', backgroundColor: 'var(--status-free)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
-                        >
-                          <CheckCircle2 size={16} />
-                          Confirm & Seat Guest
-                        </button>
-                        <button 
-                          onClick={() => deleteWaitlist(entry._id)} 
-                          className="btn-secondary" 
-                          style={{ padding: '0.45rem 0.85rem', color: 'var(--status-occupied)', borderColor: 'rgba(239, 68, 68, 0.3)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                          title="Cancel and remove from waitlist"
-                        >
-                          <Trash2 size={15} />
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Quick table availability hint */}
-                    <div style={{ fontSize: '0.78rem', padding: '0.5rem 0.75rem', backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <span>
-                        {availableForParty.length > 0 ? (
-                          <span style={{ color: 'var(--status-free)' }}>
-                            ● {availableForParty.length} table(s) available for {entry.partySize} guests ({availableForParty.map(t => `T-${t.number}`).join(', ')})
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--status-waitlist)' }}>
-                            ● No immediate empty tables with capacity ≥ {entry.partySize}. You can seat at any available table or wait for active diners to complete.
-                          </span>
-                        )}
-                      </span>
-                      <button 
-                        onClick={() => {
-                          setSelectedWaitlistEntry(entry);
-                          setCurrentView('floor');
-                        }}
-                        style={{ background: 'transparent', border: 'none', color: 'var(--accent-gold)', cursor: 'pointer', fontSize: '0.78rem', textDecoration: 'underline' }}
-                      >
-                        View Interactive Floor Plan →
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {(operations.waitlist?.entries?.length === 0 || (!operations.waitlist?.entries && waitlist.length === 0)) && (
-                <div style={{ textAlign: 'center', padding: '3.5rem 1rem', color: 'var(--text-muted)' }}>
-                  <Clock size={38} style={{ color: 'var(--text-muted)', margin: '0 auto 0.75rem auto' }} />
-                  <p style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>Waiting List is Currently Empty</p>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', maxWidth: '480px', margin: '0.35rem auto 1.25rem' }}>
-                    Guests who successfully booked a table are under <strong>All Reservations</strong> or on the <strong>Floor Plan</strong>. Only walk-in guests or requests during peak full capacity appear in this waitlist queue.
-                  </span>
-                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <button 
-                      onClick={() => setCurrentView('bookings')} 
-                      className="btn-primary"
-                      style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem' }}
-                    >
-                      <Calendar size={15} style={{ marginRight: '6px', display: 'inline' }} />
-                      View All Reservations ({bookings.length})
-                    </button>
-                    <button 
-                      onClick={() => setCurrentView('floor')} 
-                      className="btn-secondary"
-                      style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem' }}
-                    >
-                      <Compass size={15} style={{ marginRight: '6px', display: 'inline' }} />
-                      View Floor Plan
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+        {(currentView === 'waitlist' || currentView === 'seating') && (
+          <WaitlistView
+            operations={operations}
+            waitlist={waitlist}
+            tables={tables}
+            bookings={bookings}
+            partySize={partySize}
+            setPartySize={setPartySize}
+            combineDate={combineDate}
+            setCombineDate={setCombineDate}
+            combineStart={combineStart}
+            setCombineStart={setCombineStart}
+            combineEnd={combineEnd}
+            setCombineEnd={setCombineEnd}
+            handleCombineStartChange={handleCombineStartChange}
+            handleCombine={handleCombine}
+            combining={combining}
+            combineError={combineError}
+            setCombineError={setCombineError}
+            combineResult={combineResult}
+            setCombineResult={setCombineResult}
+            setCombinedTables={setCombinedTables}
+            openPromoteModal={openPromoteModal}
+            deleteWaitlist={deleteWaitlist}
+            setSelectedWaitlistEntry={setSelectedWaitlistEntry}
+            navigateToView={navigateToView}
+            currentTime={currentTime}
+            isRefreshing={isRefreshing}
+            fetchData={fetchData}
+          />
         )}
 
         {/* ==========================================
-           VIEW: TABLES (TABLE INVENTORY & FORM)
+           VIEW: TABLES (TABLE INVENTORY & CONFIGURATION)
            ========================================== */}
         {currentView === 'tables' && (
-          <div className="grid-layout" style={{ gridTemplateColumns: '1.2fr 0.8fr' }}>
-            <div className="panel-card">
-              <h3 className="panel-title">Table Layout Inventory</h3>
-              <div className="floor-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '1.25rem', marginTop: '1.5rem' }}>
+          <div className="grid-layout" style={{ gridTemplateColumns: '1.3fr 0.7fr', gap: '1.25rem' }}>
+            <div className="panel-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0, fontFamily: 'Geist, sans-serif' }}>
+                    Table Layout Inventory
+                  </h3>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Physical dining tables registered in the restaurant system.
+                  </span>
+                </div>
+                <span style={{ fontFamily: 'Geist, monospace', fontSize: '0.88rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  {tables.length} Total Tables
+                </span>
+              </div>
+
+              <div className="floor-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '1rem' }}>
                 {tables.map(table => (
-                  <div key={table._id} className="table-node" style={{ pointerEvents: 'none', height: '110px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                      <span className="table-number" style={{ fontSize: '1.1rem' }}>T-{table.number}</span>
-                      <span style={{ fontSize: '0.8rem', color: table.isOccupied ? 'var(--status-occupied)' : 'var(--status-free)' }}>
-                        ●
+                  <div key={table._id} className="stitch-table-box" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '110px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                      <span className="stitch-table-id" style={{ fontSize: '1.05rem', fontWeight: 700 }}>T-{table.number}</span>
+                      <span style={{ fontSize: '0.75rem', color: table.isOccupied ? 'var(--status-occupied)' : 'var(--status-free)', fontWeight: 700 }}>
+                        ● {table.isOccupied ? 'OCC' : 'AVAIL'}
                       </span>
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                      <span>Seats: {table.capacity}</span>
-                      <br />
-                      <span>{table.location}</span>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      <div>Seats: <strong style={{ color: 'var(--text-primary)' }}>{table.capacity}</strong></div>
+                      <div>Zone: <strong>{table.location}</strong></div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="panel-card">
-              <h3 className="panel-title">
-                <Plus size={20} className="logo-icon" />
-                Add Table
+            <div className="panel-card" style={{ padding: '1.5rem' }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0, marginBottom: '1.25rem', fontFamily: 'Geist, sans-serif', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Plus size={18} className="logo-icon" />
+                Add Dining Table
               </h3>
 
               <form onSubmit={handleAddTable}>
@@ -2344,7 +1141,7 @@ export default function ManagementPortal() {
                   <input 
                     type="text" 
                     className="form-input" 
-                    placeholder="e.g. 1A" 
+                    placeholder="e.g. 1A or 12" 
                     value={number} 
                     onChange={(e) => setNumber(e.target.value)}
                     required
@@ -2355,11 +1152,11 @@ export default function ManagementPortal() {
                   <div className="form-group">
                     <label className="form-label">Seats</label>
                     <select className="form-select" value={capacity} onChange={(e) => setCapacity(e.target.value)}>
-                      <option value="2">2</option>
-                      <option value="4">4</option>
-                      <option value="6">6</option>
-                      <option value="8">8</option>
-                      <option value="10">10</option>
+                      <option value="2">2 Guests</option>
+                      <option value="4">4 Guests</option>
+                      <option value="6">6 Guests</option>
+                      <option value="8">8 Guests</option>
+                      <option value="10">10 Guests</option>
                     </select>
                   </div>
 
@@ -2383,7 +1180,7 @@ export default function ManagementPortal() {
                   </select>
                 </div>
 
-                <button type="submit" className="btn-primary" disabled={submittingTable}>
+                <button type="submit" className="stitch-action-btn primary" style={{ width: '100%', padding: '0.65rem', justifyContent: 'center' }} disabled={submittingTable}>
                   {submittingTable ? 'Adding...' : 'Add to Layout'}
                 </button>
               </form>
@@ -2404,19 +1201,12 @@ export default function ManagementPortal() {
          DRAWER / MODAL FOR TABLE DETAILS
          ========================================== */}
       {activeTableDetail && (() => {
-        const tableRes = getTableReservations(activeTableDetail._id);
-        const currentActive = getCurrentBooking(activeTableDetail._id) || (activeTableDetail.currentGuest ? {
-          _id: activeTableDetail.currentGuest.bookingId,
-          customerName: activeTableDetail.currentGuest.customerName,
-          partySize: activeTableDetail.currentGuest.partySize,
-          contact: activeTableDetail.currentGuest.contact,
-          startTime: activeTableDetail.currentGuest.startTime,
-          endTime: activeTableDetail.currentGuest.endTime,
-          durationMinutes: activeTableDetail.currentGuest.durationMinutes,
-          status: activeTableDetail.currentGuest.status
-        } : null);
-        const upcomingListForTable = tableRes.filter(b => b._id !== currentActive?._id);
-        const tableStatus = activeTableDetail.operationalStatus || (activeTableDetail.isOccupied ? 'OCCUPIED' : (upcomingListForTable.length > 0 ? 'RESERVED' : 'AVAILABLE'));
+        const {
+          currentSeating: currentActive,
+          upcomingReservations: upcomingListForTable,
+          isPhysicallyOccupied,
+          operationalStatus: tableStatus
+        } = classifyTableReservations(activeTableDetail._id, bookings, activeTableDetail, currentTime);
 
         return (
           <div className="drawer-overlay" onClick={() => setActiveTableDetail(null)}>
@@ -2451,7 +1241,7 @@ export default function ManagementPortal() {
                 <div style={{ padding: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 'var(--radius-md)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                     <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--status-occupied)', textTransform: 'uppercase' }}>
-                      Currently Seated Guest
+                      CURRENT SEATING
                     </span>
                     {currentActive.durationMinutes !== undefined && (
                       <span className="duration-pill">
@@ -2464,8 +1254,11 @@ export default function ManagementPortal() {
                   </h4>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
                     <div>Party Size: <strong>{currentActive.partySize} guests</strong></div>
-                    <div>Contact: {currentActive.contact}</div>
-                    <div>Time: <strong>{currentActive.startTime} – {currentActive.endTime}</strong></div>
+                    <div>Phone: {currentActive.contact}</div>
+                    <div>Time: <strong>{currentActive.startTime} – {currentActive.endTime}</strong> ({currentActive.bookingDate || 'Today'})</div>
+                    <div style={{ marginTop: '0.25rem' }}>
+                      Status: <span className="status-badge seated" style={{ textTransform: 'uppercase', fontSize: '0.72rem', padding: '0.15rem 0.45rem', fontWeight: 700 }}>{currentActive.status}</span>
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.85rem' }}>
                     <button 
@@ -2476,7 +1269,7 @@ export default function ManagementPortal() {
                       className="btn-primary"
                       style={{ flex: 1, backgroundColor: 'var(--status-free)' }}
                     >
-                      <CheckCircle2 size={16} style={{ marginRight: '4px' }} /> Free Table / Complete Dining
+                      <CheckCircle2 size={16} style={{ marginRight: '4px' }} /> Complete Dining
                     </button>
                     <button 
                       onClick={async () => {
@@ -2492,21 +1285,21 @@ export default function ManagementPortal() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <div style={{ padding: '1rem', backgroundColor: activeTableDetail.isOccupied ? 'rgba(239, 68, 68, 0.05)' : 'rgba(16, 185, 129, 0.05)', border: activeTableDetail.isOccupied ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)', borderRadius: 'var(--radius-md)' }}>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: activeTableDetail.isOccupied ? 'var(--status-occupied)' : 'var(--status-free)', textTransform: 'uppercase', display: 'block', marginBottom: '0.25rem' }}>
-                      Physical Table State: {activeTableDetail.isOccupied ? 'Occupied' : 'Vacant'}
+                  <div style={{ padding: '1rem', backgroundColor: isPhysicallyOccupied ? 'rgba(239, 68, 68, 0.05)' : 'rgba(16, 185, 129, 0.05)', border: isPhysicallyOccupied ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)', borderRadius: 'var(--radius-md)' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: isPhysicallyOccupied ? 'var(--status-occupied)' : 'var(--status-free)', textTransform: 'uppercase', display: 'block', marginBottom: '0.25rem' }}>
+                      Physical Table State: {isPhysicallyOccupied ? 'Occupied' : 'Vacant'}
                     </span>
                     <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0.75rem 0' }}>
-                      {activeTableDetail.isOccupied 
+                      {isPhysicallyOccupied 
                         ? 'Table is currently marked as occupied on the restaurant floor.' 
                         : `No guest is currently seated. Table capacity: ${activeTableDetail.capacity} seats.`}
                     </p>
                     <button 
                       onClick={() => toggleOccupied(activeTableDetail)}
                       className="btn-secondary"
-                      style={{ width: '100%', color: activeTableDetail.isOccupied ? 'var(--status-free)' : 'var(--accent-gold)' }}
+                      style={{ width: '100%', color: isPhysicallyOccupied ? 'var(--status-free)' : 'var(--accent-gold)' }}
                     >
-                      {activeTableDetail.isOccupied ? '✓ Mark Physically Vacant (Free Table)' : '● Mark Physically Occupied (Walk-in)'}
+                      {isPhysicallyOccupied ? '✓ Mark Physically Vacant (Free Table)' : '● Mark Physically Occupied (Walk-in)'}
                     </button>
                   </div>
 
@@ -2632,7 +1425,7 @@ export default function ManagementPortal() {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.75)',
+          backgroundColor: 'rgba(28, 28, 28, 0.45)',
           backdropFilter: 'blur(4px)',
           display: 'flex',
           justifyContent: 'center',
@@ -2707,7 +1500,7 @@ export default function ManagementPortal() {
                 </div>
               ) : (
                 <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                  Assign remaining guests across multiple tables with 0 wasted capacity using backtracking optimization.
+                  Assign remaining guests across multiple tables with zero empty seats.
                 </span>
               )}
             </div>
@@ -2898,7 +1691,7 @@ export default function ManagementPortal() {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.75)',
+          backgroundColor: 'rgba(28, 28, 28, 0.45)',
           backdropFilter: 'blur(4px)',
           display: 'flex',
           justifyContent: 'center',
@@ -2935,7 +1728,7 @@ export default function ManagementPortal() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {auditHistory.map((ev, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem', padding: '0.75rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div key={i} style={{ display: 'flex', gap: '0.75rem', fontSize: '0.85rem', padding: '0.75rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
                       <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--accent-gold)', marginTop: '6px', flexShrink: 0 }} />
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

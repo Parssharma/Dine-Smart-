@@ -1,0 +1,368 @@
+================================================================================
+           🍽️ DINESMART — COMPLETE PROJECT MASTER DOCUMENTATION (info.txt)
+================================================================================
+Platform:       DineSmart — Intelligent Restaurant Reservation & Operations Platform
+Repository:     Parssharma/Dine-Smart-
+Created / Upgraded: Up to Phase 16A Architecture
+Author:         DineSmart Engineering Team
+================================================================================
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+DineSmart bridges high-performance low-level Data Structures & Algorithms (DSA)
+in C++ with modern web application engineering (Node.js/Express, MongoDB, 
+React + Vite).
+
+It solves operational bottlenecks in high-volume dining environments:
+- Real-time table searching, ranking, and AI recommendations
+- Large party multi-table combinations via Backtracking optimization
+- Live restaurant floor operations & dynamic occupancy tracking
+- FIFO digital queue/waitlist with automated promotion
+- Complete reservation lifecycle state machines with append-only audit trail
+- Business Intelligence & Operational Analytics with CSV export
+- Strict Role-Based Access Control (RBAC) and JWT Authentication
+- Clean architectural separation between Customer & Management Portals
+
+--------------------------------------------------------------------------------
+2. SYSTEM ARCHITECTURE & TECH STACK
+--------------------------------------------------------------------------------
+
+[1] FRONTEND (React 19 + Vite 8)
+    - Architecture: Route-based Multi-Portal Architecture (React Router)
+    - Customer Application: /, /reserve, /reservations
+    - Management Application: /management/login, /management, /management/*
+    - Styling: Vanilla CSS with custom HSL/dark theme tokens, glassmorphism, responsive design
+    - Icons: lucide-react
+
+[2] BACKEND (Node.js + Express + Mongoose)
+    - Framework: Express.js REST API
+    - Database: MongoDB via Mongoose ODM
+    - Authentication: Stateless JWT + Bcrypt password hashing
+    - Authorization: Role-Based Access Control (CUSTOMER vs MANAGER)
+    - Concurrency Control: Asynchronous global mutex locks for atomic table operations
+    - IPC: Child process stdio JSON streaming with 5000ms timeout safeguards
+
+[3] DSA ENGINE (C++17 Standalone Subprocess)
+    - Priority Queue / Max-Heap: Multi-factor scoring for optimal table recommendations
+    - Backtracking Combiner: Optimal subset-sum table combinations for large parties
+    - Custom HashMap: Quadratic probing & polynomial string hashing for O(1) table lookup
+    - FIFO Queue: Arrival-based waitlist sequencing
+
+--------------------------------------------------------------------------------
+3. DETAILED C++ DSA ENGINE SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+File Path: dsa-engine/src/
+Executable: dsa-engine/engine.exe
+
+[A] Backtracking Algorithm (dsa-engine/src/Backtracking.hpp)
+    - Purpose: Finds optimal combinations of available tables for large groups (>= 6).
+    - Goal: Accommodate party size while strictly MINIMIZING unused seat capacity.
+    - Complexity: O(2^N) search space with aggressive branch pruning.
+    - Output: Array of selected table IDs and total combined capacity.
+
+[B] Priority Queue / Max-Heap (dsa-engine/src/PriorityQueue.hpp)
+    - Purpose: Real-time table recommendation ranking.
+    - Multi-Factor Scoring Formula:
+        Score = (CapacityFit * 10) + (LocationMatch * 5) + (Rating * 2)
+        - CapacityFit = 10 if table.capacity == partySize else max(1, 10 - (table.capacity - partySize))
+        - LocationMatch = 1 if table.location == preference else 0
+        - Rating = table.rating (1.0 to 5.0)
+    - Complexity: O(N log K) to return top-ranked recommendations.
+
+[C] Custom HashMap (dsa-engine/src/HashMap.hpp)
+    - Purpose: O(1) in-memory table lookup by ID.
+    - Implementation: Polynomial rolling string hash with Quadratic Probing collision resolution.
+
+[D] FIFO Queue (dsa-engine/src/Queue.hpp)
+    - Purpose: First-In, First-Out queue ordering for waitlisted diners.
+    - Implementation: Custom linked queue preserving strict arrival timestamps.
+
+--------------------------------------------------------------------------------
+4. FRONTEND ROUTING & PORTAL ARCHITECTURE (PHASE 16A)
+--------------------------------------------------------------------------------
+
+The frontend is completely route-separated into two distinct portals:
+
+[A] CUSTOMER APPLICATION
+    URL Namespace: /
+    - /              → CustomerHomePage (Hero, Value propositions, CTA)
+    - /reserve       → FindTablePage (Search, recommendations, table booking form)
+    - /reservations  → MyReservationsPage (Customer's own bookings, timeline, cancel)
+    - Navigation: Home | Find a Table | My Reservations | Notifications | Profile
+    - Isolation: Management controls, CRUD, and admin tabs are completely excluded.
+
+[B] MANAGEMENT APPLICATION
+    URL Namespace: /management
+    - /management/login     → Dedicated Manager Login Page
+    - /management           → Operations Dashboard (KPIs, active dining, alerts)
+    - /management/floor     → Interactive Live Floor Plan (Table map, status chips)
+    - /management/bookings  → All Reservations (Lifecycle management)
+    - /management/history   → Full Audit History & Timeline Filters
+    - /management/waitlist  → Live Waitlist & Smart Table Allocation
+    - /management/tables    → Table CRUD & Status Management
+    - /management/analytics → Business Intelligence, Utilization & CSV Export
+    - Security: Route-level guard (ManagementLayout) checks authentication and role:
+        * Logged-out user       → Redirects to /management/login
+        * Logged-in Customer    → Renders Access Denied Page (403)
+        * Logged-in Manager     → Renders Management Portal with active view
+
+[C] SHARED INFRASTRUCTURE
+    - /*                    → 404 Page (Professional Not Found with portal links)
+    - AuthLoadingScreen     → Prevents UI flicker during token initialization
+    - NotificationCenter    → Real-time alerts for bookings, waitlist, reminders
+
+--------------------------------------------------------------------------------
+5. SECURITY, AUTHENTICATION & RBAC MODEL
+--------------------------------------------------------------------------------
+
+- Passwords hashed using bcrypt (10 rounds).
+- Passwords and password hashes are strictly stripped from all API outputs.
+- JWT tokens signed with HMAC-SHA256 containing userId and role.
+- Role Hierarchy:
+    * CUSTOMER : Can book tables, view own bookings/history, join waitlist, cancel own.
+    * MANAGER  : Full access to operational dashboard, floor plan, table CRUD, 
+                 lifecycle state changes (Check-in, Seat, Complete, No-Show), 
+                 waitlist promotions, analytics, and audit trail.
+
+API Authorization Matrix:
++------------------------------------+----------------+----------------+----------------+
+| Endpoint                           | Unauthenticated| CUSTOMER       | MANAGER        |
++------------------------------------+----------------+----------------+----------------+
+| POST /api/auth/register            | 201 Created    | 201 Created    | 201 Created    |
+| POST /api/auth/login               | 200 OK         | 200 OK         | 200 OK         |
+| GET  /api/auth/me                  | 401 Unauth     | 200 OK         | 200 OK         |
+| GET  /api/tables                   | 200 OK (Public)| 200 OK         | 200 OK         |
+| POST /api/tables (Create)          | 401 Unauth     | 403 Forbidden  | 201 Created    |
+| PUT  /api/tables/:id (Update)      | 401 Unauth     | 403 Forbidden  | 200 OK         |
+| DELETE /api/tables/:id             | 401 Unauth     | 403 Forbidden  | 200 OK         |
+| POST /api/bookings (Create)        | 401 Unauth     | 201 Created    | 201 Created    |
+| GET  /api/bookings                 | 401 Unauth     | Own Bookings   | All Bookings   |
+| PUT  /api/bookings/:id/check-in    | 401 Unauth     | 403 Forbidden  | 200 OK         |
+| PUT  /api/bookings/:id/no-show     | 401 Unauth     | 403 Forbidden  | 200 OK         |
+| GET  /api/operations/summary       | 401 Unauth     | 403 Forbidden  | 200 OK         |
+| GET  /api/analytics/*              | 401 Unauth     | 403 Forbidden  | 200 OK         |
+| GET  /api/analytics/export/csv     | 401 Unauth     | 403 Forbidden  | 200 OK (CSV)   |
++------------------------------------+----------------+----------------+----------------+
+
+--------------------------------------------------------------------------------
+6. BOOKING LIFECYCLE & AUDIT STATE MACHINE
+--------------------------------------------------------------------------------
+
+Lifecycle States:
+  Confirmed ──> Checked In ──> Seated ──> Completed
+      │                            │
+      ├──> Cancelled               └──> Cancelled
+      └──> No Show
+
+Key Rules:
+1. Double-Booking Prevention: Atomic conflict check prevents overlapping time slots 
+   on the same table for identical dates.
+2. Advance vs Live Occupancy: Advance bookings mark table status as RESERVED without 
+   forcing physical table isOccupied=true until live time slot arrives.
+3. Append-Only Audit Trail: Every state transition logs:
+   - previousStatus, newStatus, timestamp, changedBy (User ID), changedByName, 
+     changedByRole, and optional reason/notes.
+4. Auto-Notification Dispatch: Triggers notification records for customer and manager 
+   upon confirmations, cancellations, check-in, and waitlist movements.
+
+--------------------------------------------------------------------------------
+7. COMPLETE DIRECTORY & FILE INVENTORY
+--------------------------------------------------------------------------------
+
+DineSmart/
+├── backend/
+│   ├── middleware/
+│   │   ├── auth.js                 (JWT verification & RBAC middleware)
+│   │   └── lockMiddleware.js       (Global async mutex lock)
+│   ├── models/
+│   │   ├── Booking.js              (Booking schema & lifecycle status)
+│   │   ├── BookingAudit.js         (Append-only audit history)
+│   │   ├── Notification.js         (User notification model)
+│   │   ├── Table.js                (Table capacity, location, status)
+│   │   ├── User.js                 (Customer/Manager accounts & credentials)
+│   │   └── Waitlist.js             (FIFO queue entries)
+│   ├── routes/
+│   │   ├── analyticsRoutes.js      (BI, trends, utilization, CSV export)
+│   │   ├── authRoutes.js           (Register, Login, Me)
+│   │   ├── bookingRoutes.js        (Bookings, check-in, seat, no-show, audit)
+│   │   ├── dsaRoutes.js            (Bridge to C++ recommendations & combiner)
+│   │   ├── notificationRoutes.js   (Fetch, mark read, unread count)
+│   │   ├── operationsRoutes.js     (Live operations summary, KPIs, alerts)
+│   │   └── tableRoutes.js          (Table CRUD)
+│   ├── scripts/
+│   │   └── simulateOps.js          (Live operations test simulator)
+│   ├── tests/
+│   │   └── run.js                  (145-test automated verification suite)
+│   ├── utils/
+│   │   ├── availabilityHelper.js   (Time overlap validation)
+│   │   ├── dsaConnector.js         (Node.js <-> C++ subprocess IPC)
+│   │   └── seedData.js             (Initial demo database seed)
+│   ├── server.js                   (Express application entry point)
+│   └── package.json
+│
+├── dsa-engine/
+│   ├── src/
+│   │   ├── Backtracking.hpp        (Subset-sum table combiner)
+│   │   ├── HashMap.hpp             (O(1) hash map implementation)
+│   │   ├── JsonParser.hpp          (Lightweight JSON serializer/parser)
+│   │   ├── PriorityQueue.hpp       (Max-heap recommendation engine)
+│   │   ├── Queue.hpp               (FIFO waitlist queue)
+│   │   ├── Table.hpp               (Table data structure)
+│   │   ├── WaitlistEntry.hpp       (Waitlist entry data structure)
+│   │   └── main.cpp                (C++ engine entry & IPC handler)
+│   └── engine.exe                  (Compiled C++ binary)
+│
+├── frontend/
+│   ├── src/
+│   │   ├── customer/
+│   │   │   ├── CustomerLayout.jsx      (Customer shell, nav, notifications)
+│   │   │   └── pages/
+│   │   │       ├── CustomerHomePage.jsx   (Landing page at /)
+│   │   │       ├── FindTablePage.jsx      (Search & booking flow at /reserve)
+│   │   │       └── MyReservationsPage.jsx (History at /reservations)
+│   │   ├── management/
+│   │   │   ├── ManagementLayout.jsx    (Auth guards for /management/*)
+│   │   │   └── pages/
+│   │   │       ├── AccessDeniedPage.jsx   (403 Forbidden page)
+│   │   │       └── ManagementLoginPage.jsx (Dedicated /management/login)
+│   │   ├── components/
+│   │   │   ├── AnalyticsDashboard.jsx  (Analytics charts & metrics)
+│   │   │   ├── CustomerPortal.jsx      (Customer booking & reservation UI)
+│   │   │   ├── ManagementPortal.jsx    (Operations, Floor, Waitlist, Tables)
+│   │   │   ├── NotificationCenter.jsx  (Shared notification dropdown)
+│   │   │   └── NotFoundPage.jsx        (404 Not Found page)
+│   │   ├── context/
+│   │   │   └── AuthContext.jsx         (JWT state, login, register, role checks)
+│   │   ├── App.jsx                     (BrowserRouter & top-level route tree)
+│   │   ├── index.css                   (Global design system & tokens)
+│   │   └── main.jsx                    (React DOM root)
+│   ├── package.json
+│   └── vite.config.js
+│
+├── info.txt                        (This complete system documentation)
+└── README.md                       (Project overview & quickstart guide)
+
+--------------------------------------------------------------------------------
+8. PHASE-BY-PHASE EVOLUTION & PROGRESS HISTORY
+--------------------------------------------------------------------------------
+
+- Phase 1-5: Core Foundation
+  * Created C++ DSA engine (HashMap, PriorityQueue, Queue, Backtracking).
+  * Built Node.js subprocess IPC connector with timeout & memory protections.
+  * Implemented Express backend and MongoDB table/booking models.
+
+- Phase 6-10: Booking Logic & Recommendations
+  * Implemented double-booking conflict algorithms and time overlap checks.
+  * Added Priority Queue multi-factor recommendation engine.
+  * Added C++ Backtracking multi-table combiner for large parties.
+
+- Phase 11-12: Waitlist & FIFO Queue
+  * Implemented digital waitlist with FIFO arrival sequencing.
+  * Created 1-click waitlist promotion to free tables with live capacity validation.
+
+- Phase 13: Authentication & Role-Based Security (RBAC)
+  * Implemented JWT stateless authentication and bcrypt password hashing.
+  * Enforced CUSTOMER vs MANAGER RBAC on all protected endpoints.
+  * Strip password fields from all database queries and responses.
+
+- Phase 14: Intelligent Operations & Real-Time Floor Plan
+  * Built unified Operations Summary API (/api/operations/summary).
+  * Implemented Live Floor Plan with table status chips (Available/Occupied/Reserved).
+  * Added overdue dining alerts (parties dining > 90 mins).
+
+- Phase 15: Booking Lifecycle, Notifications & Audit Trail
+  * Complete lifecycle state machine (Confirmed -> Checked In -> Seated -> Completed).
+  * Built append-only audit trail logging for all reservation changes.
+  * Created real-time Notification Center with unread counter.
+
+- Phase 16: Advanced Analytics & Business Intelligence
+  * Implemented Analytics Dashboard with date presets (Today, 7D, 30D, Month, Custom).
+  * Computed utilization rates, completion/cancellation/no-show rates, peak hours.
+  * Added DSA engine performance metrics and 1-Click CSV Export.
+
+- Phase 16A: Architectural Separation of Customer & Management Applications
+  * Removed legacy on-page tab switching buttons from App.jsx.
+  * Installed react-router-dom for proper SPA URL-based navigation.
+  * Created isolated Customer Application (/, /reserve, /reservations).
+  * Created isolated Management Application (/management/*) with route-level guards.
+  * Added dedicated Management Login (/management/login), Access Denied (403), and 404 pages.
+  * Fixed auth loading flickering with dedicated AuthLoadingScreen.
+
+- Phase 16B: Role-Specific Authentication & Management Access Fix
+  * Customer Login strictly enforces CUSTOMER role and rejects MANAGER credentials:
+    "This account is registered for management access. Please use the Management Login."
+  * Management Login strictly enforces MANAGER role and rejects CUSTOMER credentials:
+    "Management access is restricted to manager accounts."
+  * Added dedicated /login (CustomerLoginPage) and /register (CustomerRegisterPage) routes.
+  * Enhanced ManagementView URL parsing and sub-path mapping (bookings, tables, waitlist, floor, seating, analytics).
+  * Added full Logout controls and NotificationCenter to manager header and sidebar.
+
+- Phase 16C: Platform Stability, Timezone Synchronization & Session Upgrades
+  * Auth & Session: Extended JWT token expiration to 30d, added automatic startup token validation and expired session cleanup.
+  * Operations & Floor Plan: Fixed UTC vs Local Timezone date filtering across operations, analytics, and booking lookup.
+  * Multi-Table Lifecycle: Upgraded bookingRoutes to handle C++ backtracking multi-table reservations across check-in, seated, and completion.
+  * UX & Error Resilience: Added Reservation Summary Card post-booking, visible HTTP error alert banners (401/500), tab focus auto-refresh, and optimized 4s polling.
+  * Notifications: Added WAITLIST_JOINED notification type and automated event dispatching.
+  * System Verification: Re-verified 100% test coverage with 145/145 passing automated backend tests.
+
+--------------------------------------------------------------------------------
+9. VERIFICATION & TEST RESULTS
+--------------------------------------------------------------------------------
+
+Automated Test Suite: backend/tests/run.js
+
+==========================================================
+DINESMART TEST RUNNER REPORT SUMMARY
+==========================================================
+TOTAL RUN: 145
+PASSED:    145
+FAILED:    0
+==========================================================
+
+Breakdown by Test Categories:
+- Tests 1-27:   Core Table CRUD, Booking Overlaps, C++ Engine IPC Failure Handling
+- Tests 28-50:  Auth, Registration, JWT Expiry, Role Enforcement, Password Scrubbing
+- Tests 51-71:  Operations Summary, Floor State, Backtracking Combiner, Dynamic Duration
+- Tests 72-110: Lifecycle Transitions, Check-In, No-Show, Audit Logging, Notifications
+- Tests 111-145:Analytics Metrics, Date Filtering, DSA Performance, CSV Export RBAC
+
+Frontend Build Verification:
+Command: npm run build (in frontend/)
+Result:  0 errors, 0 warnings (built in < 1.0s)
+
+--------------------------------------------------------------------------------
+10. HOW TO RUN & DEVELOP
+--------------------------------------------------------------------------------
+
+[1] Prerequisites:
+    - Node.js (v18+)
+    - MongoDB running on mongodb://localhost:27017/smart-booking
+    - g++ compiler (for C++ engine compilation if rebuilding)
+
+[2] Compile C++ Engine:
+    cd dsa-engine
+    g++ -std=c++17 src/main.cpp -o engine.exe
+
+[3] Start Backend:
+    cd backend
+    npm install
+    npm run dev          (Runs on http://localhost:5000)
+
+[4] Start Frontend:
+    cd frontend
+    npm install
+    npm run dev          (Runs on http://localhost:5173)
+
+[5] Run Tests:
+    cd backend
+    npm test
+
+[6] Demo Accounts:
+    Manager  : manager@dinesmart.com  / Manager123!
+    Customer : customer@dinesmart.com / customer123
+
+================================================================================
+                       END OF MASTER DOCUMENTATION (info.txt)
+================================================================================

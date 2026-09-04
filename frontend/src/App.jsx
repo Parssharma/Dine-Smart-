@@ -1,103 +1,146 @@
-import React, { useState } from 'react';
-import { UtensilsCrossed, Users, Settings, LogOut, ShieldCheck, User as UserIcon } from 'lucide-react';
-import CustomerPortal from './components/CustomerPortal';
-import ManagementPortal from './components/ManagementPortal';
-import NotificationCenter from './components/NotificationCenter';
+import React from 'react';
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { UtensilsCrossed } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
-function NavigationBar({ activeTab, setActiveTab }) {
-  const { user, isAuthenticated, logout } = useAuth();
+// Customer Application
+import CustomerLayout from './customer/CustomerLayout';
+import CustomerHomePage from './customer/pages/CustomerHomePage';
+import FindTablePage from './customer/pages/FindTablePage';
+import MyReservationsPage from './customer/pages/MyReservationsPage';
 
+// Management Application
+import ManagementLayout from './management/ManagementLayout';
+import ManagementLoginPage from './management/pages/ManagementLoginPage';
+import ManagementPortal from './components/ManagementPortal';
+
+// Shared
+import NotFoundPage from './components/NotFoundPage';
+
+// Valid management sub-views
+const VALID_VIEWS = new Set(['dashboard', 'floor', 'seating', 'bookings', 'history', 'waitlist', 'tables', 'analytics']);
+
+/**
+ * ProtectedRoute: Enforces role-based authorization for protected routes.
+ * Redirects unauthenticated or wrong-role users to their portal login.
+ */
+function ProtectedRoute({ role, children }) {
+  const { user, token, loading } = useAuth();
+  if (loading) return null;
+  if (!token || !user) {
+    return <Navigate to={role === 'MANAGER' ? '/management/login' : '/customer'} replace />;
+  }
+  if (user?.role !== role) {
+    return <Navigate to={role === 'MANAGER' ? '/management/login' : '/customer'} replace />;
+  }
+  return children;
+}
+
+/**
+ * ManagementView: Derives the management view from the current URL path
+ * and passes it to ManagementPortal as initialView.
+ * Uses a single ManagementPortal instance to preserve component state
+ * (tables, bookings, etc.) across internal navigation.
+ */
+function ManagementView() {
+  const location = useLocation();
+  // Extract the sub-path after /management/ or /management
+  const rawPath = location.pathname.replace(/^\/management\/?/, '').toLowerCase();
+  
+  if (rawPath === '' || rawPath === 'dashboard') {
+    return <ManagementPortal initialView="dashboard" />;
+  }
+
+  const mappedView = rawPath === 'seating' ? 'floor' : rawPath;
+  
+  // If the route is not a valid management view, show 404 instead of defaulting to dashboard
+  if (!VALID_VIEWS.has(mappedView)) {
+    return <NotFoundPage />;
+  }
+
+  return <ManagementPortal initialView={mappedView} />;
+}
+
+/**
+ * AuthLoadingScreen: Displayed while authentication state is being initialized.
+ * Prevents UI flickering (e.g., briefly showing customer portal then redirecting).
+ */
+function AuthLoadingScreen() {
   return (
-    <header className="app-header">
-      <div className="logo-container">
-        <UtensilsCrossed size={28} className="logo-icon" />
-        <span className="logo-text">DineSmart</span>
+    <div className="auth-loading-screen">
+      <div className="auth-loading-content">
+        <UtensilsCrossed size={40} className="logo-icon auth-loading-icon" />
+        <span className="logo-text" style={{ fontSize: '1.8rem' }}>DineSmart</span>
+        <div className="auth-loading-spinner" />
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '1rem' }}>
+          Initializing session...
+        </p>
       </div>
-
-      {/* Tab Selection */}
-      <nav className="nav-tabs">
-        <button 
-          className={`nav-tab ${activeTab === 'customer' ? 'active' : ''}`}
-          onClick={() => setActiveTab('customer')}
-        >
-          <Users size={16} />
-          Customer Portal
-        </button>
-        <button 
-          className={`nav-tab ${activeTab === 'management' ? 'active' : ''}`}
-          onClick={() => setActiveTab('management')}
-        >
-          <Settings size={16} />
-          Management Portal
-        </button>
-      </nav>
-
-      {/* Auth Status & User Info */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        {isAuthenticated && user ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <NotificationCenter />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.75rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-full)', border: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
-              {user?.role === 'MANAGER' ? (
-                <ShieldCheck size={16} style={{ color: 'var(--accent-gold)' }} />
-              ) : (
-                <UserIcon size={16} style={{ color: 'var(--status-free)' }} />
-              )}
-              <span style={{ fontWeight: 500 }}>{user?.name || 'User'}</span>
-              <span style={{ 
-                fontSize: '0.7rem', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: 'var(--radius-sm)', 
-                backgroundColor: user?.role === 'MANAGER' ? 'var(--accent-gold-glow)' : 'var(--status-free-glow)',
-                color: user?.role === 'MANAGER' ? 'var(--accent-gold)' : 'var(--status-free)',
-                fontWeight: 600
-              }}>
-                {user?.role || 'GUEST'}
-              </span>
-            </div>
-            <button 
-              onClick={logout}
-              className="btn-secondary"
-              style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderRadius: 'var(--radius-sm)' }}
-              title="Sign Out"
-            >
-              <LogOut size={14} />
-              <span>Logout</span>
-            </button>
-          </div>
-        ) : (
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            <span>Guest Session</span>
-          </div>
-        )}
-      </div>
-    </header>
+    </div>
   );
 }
 
-function MainApp() {
-  const [activeTab, setActiveTab] = useState('customer'); // 'customer' or 'management'
+/**
+ * AppRoutes: Defines all application routes.
+ * Wrapped inside AuthProvider so useAuth() is available.
+ */
+function AppRoutes() {
+  const { loading } = useAuth();
+
+  // Show loading screen while auth state initializes (prevents flicker)
+  if (loading) {
+    return <AuthLoadingScreen />;
+  }
 
   return (
-    <div className="app-container">
-      <NavigationBar activeTab={activeTab} setActiveTab={setActiveTab} />
-      <main className="main-content">
-        {activeTab === 'customer' ? (
-          <CustomerPortal />
-        ) : (
-          <ManagementPortal />
-        )}
-      </main>
-    </div>
+    <Routes>
+      {/* Root redirect to /customer */}
+      <Route path="/" element={<Navigate to="/customer" replace />} />
+
+      {/* ========================================
+          CUSTOMER PORTAL (/customer/*)
+          ======================================== */}
+      <Route path="customer" element={<CustomerLayout />}>
+        <Route index element={<CustomerHomePage />} />
+        <Route path="reserve" element={<FindTablePage />} />
+        <Route 
+          path="reservations" 
+          element={
+            <ProtectedRoute role="CUSTOMER">
+              <MyReservationsPage />
+            </ProtectedRoute>
+          } 
+        />
+      </Route>
+
+      {/* ========================================
+          MANAGEMENT PORTAL (/management/*)
+          ======================================== */}
+      <Route path="management/login" element={<ManagementLoginPage />} />
+      <Route path="management" element={<ManagementLayout />}>
+        <Route path="*" element={<ManagementView />} />
+        <Route index element={<ManagementView />} />
+      </Route>
+
+      {/* Legacy Redirect Shortcuts */}
+      <Route path="login" element={<Navigate to="/customer" replace />} />
+      <Route path="register" element={<Navigate to="/customer" replace />} />
+      <Route path="reserve" element={<Navigate to="/customer/reserve" replace />} />
+      <Route path="reservations" element={<Navigate to="/customer/reservations" replace />} />
+
+      {/* Catch-all */}
+      <Route path="*" element={<Navigate to="/customer" replace />} />
+    </Routes>
   );
 }
 
 function App() {
   return (
-    <AuthProvider>
-      <MainApp />
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 
