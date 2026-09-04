@@ -35,8 +35,9 @@ services:
         sync: false  # Set to your frontend URL, e.g. https://dinesmart-frontend.onrender.com
 
   # ── Frontend (Static Site) ──
-  - type: static
+  - type: web
     name: dinesmart-frontend
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
