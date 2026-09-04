@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-
-const API_BASE = 'http://localhost:5000/api';
+import { API_BASE } from '../config/api';
 
 export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'login', onAuthSuccess }) {
   const { login, register } = useAuth();

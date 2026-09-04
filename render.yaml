@@ -1,0 +1,52 @@
+services:
+  # ── Backend (Node.js Web Service) ──
+  - type: web
+    name: dinesmart-api
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false  # You'll set this manually in Render dashboard
+      - key: JWT_SECRET
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: MANAGER_EMAIL
+        sync: false
+      - key: MANAGER_PASSWORD
+        sync: false
+      - key: FRONTEND_URL
+        sync: false  # Set to your frontend URL, e.g. https://dinesmart-frontend.onrender.com
+
+  # ── Frontend (Static Site) ──
+  - type: web
+    name: dinesmart-frontend
+    runtime: static
+    region: oregon
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false  # Set to your backend URL, e.g. https://dinesmart-api.onrender.com/api

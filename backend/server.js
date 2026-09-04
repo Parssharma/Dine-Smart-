@@ -17,7 +17,11 @@ const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/smart-booking';
 
 // Middleware
-app.use(cors());
+const allowedOrigins = process.env.FRONTEND_URL
+  ? [process.env.FRONTEND_URL, 'http://localhost:5173']
+  : undefined; // undefined = allow all (dev mode)
+
+app.use(cors(allowedOrigins ? { origin: allowedOrigins, credentials: true } : {}));
 app.use(express.json());
 
 // API Routes

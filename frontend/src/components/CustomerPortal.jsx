@@ -5,8 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { isValidPhoneNumber } from 'libphonenumber-js';
-
-const API_BASE = 'http://localhost:5000/api';
+import { API_BASE } from '../config/api';
 
 function isObviouslyFakeNumber(digitsOnly) {
   const sequential = "0123456789";

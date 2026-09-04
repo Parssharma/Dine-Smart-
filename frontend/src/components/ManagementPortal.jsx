@@ -14,8 +14,7 @@ import FloorPlanView from '../management/components/FloorPlanView';
 import WaitlistView from '../management/components/WaitlistView';
 import TopNav from '../management/components/TopNav';
 import { classifyTableReservations } from '../utils/reservationClassification';
-
-const API_BASE = 'http://localhost:5000/api';
+import { API_BASE } from '../config/api';
 
 // Map internal view names to management routes
 const VIEW_ROUTE_MAP = {
