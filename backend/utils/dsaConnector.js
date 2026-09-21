@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 /**
@@ -11,7 +12,15 @@ const path = require('path');
 function runDsaEngine(payload) {
   return new Promise((resolve) => {
     // Locate the engine executable relative to this file
-    const enginePath = path.join(__dirname, '..', '..', 'dsa-engine', 'engine.exe');
+    const isWin = process.platform === 'win32';
+    let enginePath = path.join(__dirname, '..', '..', 'dsa-engine', isWin ? 'engine.exe' : 'engine');
+    
+    if (!fs.existsSync(enginePath)) {
+      const altPath = path.join(__dirname, '..', '..', 'dsa-engine', isWin ? 'engine' : 'engine.exe');
+      if (fs.existsSync(altPath)) {
+        enginePath = altPath;
+      }
+    }
     
     let child;
     try {

@@ -6,7 +6,7 @@ services:
     region: oregon
     plan: free
     rootDir: backend
-    buildCommand: npm install
+    buildCommand: npm install && node utils/buildDsa.js && chmod +x ../dsa-engine/engine 2>/dev/null; true
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
