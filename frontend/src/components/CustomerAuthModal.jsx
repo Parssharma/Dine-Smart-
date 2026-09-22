@@ -55,6 +55,8 @@ export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'logi
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const [isWaking, setIsWaking] = useState(false);
+
   const handleSendOtp = async () => {
     if (!authEmail) {
       setOtpStatus("error");
@@ -63,9 +65,11 @@ export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'logi
     }
     setOtpStatus("sending");
     setOtpError(null);
+    setIsWaking(false);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const wakeTimer = setTimeout(() => setIsWaking(true), 5000);
 
     try {
       const res = await fetch(`${API_BASE}/auth/send-otp`, {
@@ -75,6 +79,8 @@ export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'logi
         signal: controller.signal
       });
       clearTimeout(timeoutId);
+      clearTimeout(wakeTimer);
+      setIsWaking(false);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 429 && data.retryAfterSeconds) {
@@ -90,9 +96,11 @@ export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'logi
       setOtpCooldown(60); // Base cooldown
     } catch (err) {
       clearTimeout(timeoutId);
+      clearTimeout(wakeTimer);
+      setIsWaking(false);
       setOtpStatus("error");
       if (err.name === 'AbortError') {
-        setOtpError("Request timed out. Please check your connection or server status and try again.");
+        setOtpError("Request timed out — server may be cold-starting on Render. Please click 'Send OTP' again.");
       } else {
         setOtpError("Network error — please check your connection and try again.");
       }
@@ -225,9 +233,10 @@ export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'logi
                   disabled={otpStatus === 'sending' || otpCooldown > 0 || !authEmail}
                   style={{ background: 'none', border: 'none', color: 'var(--accent-gold)', fontSize: '0.8rem', cursor: (otpStatus === 'sending' || otpCooldown > 0 || !authEmail) ? 'not-allowed' : 'pointer', fontWeight: 600, opacity: (otpStatus === 'sending' || otpCooldown > 0 || !authEmail) ? 0.6 : 1 }}
                 >
-                  {otpStatus === 'sending' ? 'Sending...' : (otpCooldown > 0 ? `Try again in ${formatCooldown(otpCooldown)}` : (otpStatus === 'sent' ? 'Resend OTP' : 'Send OTP'))}
+                  {otpStatus === 'sending' ? (isWaking ? 'Sending (Waking server...)' : 'Sending...') : (otpCooldown > 0 ? `Try again in ${formatCooldown(otpCooldown)}` : (otpStatus === 'sent' ? 'Resend OTP' : 'Send OTP'))}
                 </button>
               </label>
+              {otpStatus === 'sending' && isWaking && <div style={{ fontSize: '0.75rem', color: 'var(--accent-gold)', marginBottom: '0.5rem' }}>Server is spinning up on Render free tier. Please wait a moment...</div>}
               {otpStatus === 'sent' && <div style={{ fontSize: '0.75rem', color: 'var(--accent-gold)', marginBottom: '0.5rem' }}>Code sent — check your inbox.</div>}
               {otpStatus === 'error' && <div style={{ fontSize: '0.75rem', color: 'var(--status-occupied)', marginBottom: '0.5rem' }}>{otpError}</div>}
               <input
