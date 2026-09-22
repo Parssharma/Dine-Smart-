@@ -63,12 +63,18 @@ export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'logi
     }
     setOtpStatus("sending");
     setOtpError(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
     try {
       const res = await fetch(`${API_BASE}/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: authEmail })
+        body: JSON.stringify({ email: authEmail }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 429 && data.retryAfterSeconds) {
@@ -83,8 +89,13 @@ export default function CustomerAuthModal({ isOpen, onClose, initialMode = 'logi
       setOtpStatus("sent");
       setOtpCooldown(60); // Base cooldown
     } catch (err) {
+      clearTimeout(timeoutId);
       setOtpStatus("error");
-      setOtpError("Network error — please check your connection and try again.");
+      if (err.name === 'AbortError') {
+        setOtpError("Request timed out. Please check your connection or server status and try again.");
+      } else {
+        setOtpError("Network error — please check your connection and try again.");
+      }
     }
   };
 
