@@ -26,21 +26,12 @@ function isObviouslyFakeNumber(digitsOnly) {
 }
 
 export default function CustomerPortal() {
-  const { user, isAuthenticated, login, register, getAuthHeaders } = useAuth();
+  const { user, isAuthenticated, openAuthModal, getAuthHeaders } = useAuth();
   
   const dateBounds = getDateBounds();
 
   // Tab View within customer portal: 'reserve' | 'my-bookings'
   const [activeCustomerTab, setActiveCustomerTab] = useState('reserve');
-
-  // Auth Modal State
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
-  const [authName, setAuthName] = useState('');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authSubmitting, setAuthSubmitting] = useState(false);
 
   // Booking Form State
   const [customerName, setCustomerName] = useState(user?.name || '');
@@ -375,28 +366,6 @@ export default function CustomerPortal() {
     return () => clearInterval(interval);
   }, [bookingSuccess]);
 
-  // Handle Customer Auth Modal Submit
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    setAuthSubmitting(true);
-    try {
-      if (authMode === 'register') {
-        await register(authName, authEmail, authPassword);
-        // Automatically log in after registration
-        await login(authEmail, authPassword);
-      } else {
-        await login(authEmail, authPassword);
-      }
-      setShowAuthModal(false);
-      setAuthPassword('');
-    } catch (err) {
-      setAuthError(err.message || 'Authentication failed');
-    } finally {
-      setAuthSubmitting(false);
-    }
-  };
-
   return (
     <div>
       {/* Customer Header Sub-Bar with Tabs & Sign In prompt */}
@@ -435,7 +404,7 @@ export default function CustomerPortal() {
 
         {!isAuthenticated && (
           <button
-            onClick={() => { setShowAuthModal(true); setAuthError(''); }}
+            onClick={() => openAuthModal('login')}
             className="btn-secondary"
             style={{ padding: '0.45rem 0.9rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
           >
@@ -1131,122 +1100,7 @@ export default function CustomerPortal() {
         </div>
       )}
 
-      {/* CUSTOMER AUTH MODAL */}
-      {showAuthModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000,
-          padding: '1rem'
-        }}>
-          <div className="panel-card" style={{ maxWidth: '420px', width: '100%', padding: '2rem', position: 'relative' }}>
-            <button
-              onClick={() => setShowAuthModal(false)}
-              style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-            >
-              <X size={20} />
-            </button>
 
-            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.4rem', marginBottom: '0.25rem' }}>
-                {authMode === 'login' ? 'Customer Sign In' : 'Create Customer Account'}
-              </h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                {authMode === 'login' ? 'Sign in to access your personal reservations' : 'Register to manage bookings seamlessly'}
-              </p>
-            </div>
-
-            {authError && (
-              <div className="alert-banner" style={{ backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--status-occupied)', marginBottom: '1rem', fontSize: '0.85rem' }}>
-                <AlertTriangle size={16} />
-                <span>{authError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleAuthSubmit}>
-              {authMode === 'register' && (
-                <div className="form-group" style={{ marginBottom: '1rem' }}>
-                  <label className="form-label">Full Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Alice Cooper"
-                    value={authName}
-                    onChange={(e) => setAuthName(e.target.value)}
-                    required
-                  />
-                </div>
-              )}
-
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label className="form-label">Email Address</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  placeholder="alice@example.com"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label className="form-label">Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  placeholder="At least 6 characters"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  required
-                  minLength={6}
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn-primary"
-                disabled={authSubmitting}
-                style={{ width: '100%', padding: '0.75rem', fontWeight: 600 }}
-              >
-                {authSubmitting ? 'Processing...' : (authMode === 'login' ? 'Sign In' : 'Create Account')}
-              </button>
-            </form>
-
-            <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              {authMode === 'login' ? (
-                <span>
-                  Don't have an account?{' '}
-                  <button
-                    onClick={() => { setAuthMode('register'); setAuthError(''); }}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--accent-gold)', cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    Register here
-                  </button>
-                </span>
-              ) : (
-                <span>
-                  Already have an account?{' '}
-<button
-                    onClick={() => { setAuthMode('login'); setAuthError(''); }}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--accent-gold)', cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    Sign In
-                  </button>
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* RESERVATION TIMELINE MODAL */}
       {selectedBookingTimeline && (
