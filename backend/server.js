@@ -18,20 +18,7 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/smart-book
 
 // Middleware
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, server-to-server)
-    if (!origin) return callback(null, true);
-    if (
-      !process.env.FRONTEND_URL ||
-      origin === process.env.FRONTEND_URL ||
-      origin.includes('localhost') ||
-      origin.endsWith('.vercel.app') ||
-      origin.includes('onrender.com')
-    ) {
-      return callback(null, true);
-    }
-    return callback(null, true);
-  },
+  origin: true,
   credentials: true
 }));
 app.use(express.json());
