@@ -220,7 +220,7 @@ router.post('/', optionalAuth, async (req, res) => {
       return res.status(400).json({ message: 'End time must be later than start time.' });
     }
 
-    // Validate 1 to 24 hour booking lead time window for customer requests
+    // Validate 1 to 24 hour booking lead time window for customer/guest requests
     const isManagerRole = req.user && req.user.role === 'MANAGER';
     const isExplicitCheck = req.headers['x-enforce-booking-window'] === 'true';
     if ((!isManagerRole && process.env.NODE_ENV !== 'test') || isExplicitCheck) {

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { API_BASE } from '../../config/api';
+import { getDateBounds, validateBookingWindowFrontend } from '../../utils/bookingWindow';
 
 /**
  * Image mapper for real restaurant sections in the database
@@ -27,18 +28,10 @@ export default function CustomerHomePage() {
   const navigate = useNavigate();
   const { user, isAuthenticated, isCustomer, openAuthModal } = useAuth();
 
-  // Dynamic Date calculation
-  const getTodayLocalStr = () => {
-    const d = new Date();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}-${month}-${day}`;
-  };
-
-  const todayStr = useMemo(() => getTodayLocalStr(), []);
+  const dateBounds = useMemo(() => getDateBounds(), []);
 
   // Form states initialized dynamically
-  const [quickDate, setQuickDate] = useState(todayStr);
+  const [quickDate, setQuickDate] = useState(dateBounds.min);
   const [quickPartySize, setQuickPartySize] = useState('2');
   const [quickTime, setQuickTime] = useState(() => {
     const now = new Date();
@@ -158,6 +151,11 @@ export default function CustomerHomePage() {
   // Handle Quick-Booking form submission: Passes selected Date + Guests + Time into the existing booking flow
   const handleQuickFindTable = (e) => {
     e.preventDefault();
+    const windowCheck = validateBookingWindowFrontend(quickDate, quickTime);
+    if (!windowCheck.valid) {
+      alert('Bookings must be made between 1 and 24 hours in advance.');
+      return;
+    }
     navigate(`/reserve?partySize=${quickPartySize}&date=${quickDate}&time=${quickTime}`);
   };
 
@@ -228,7 +226,8 @@ export default function CustomerHomePage() {
                     value={quickDate}
                     onChange={(e) => setQuickDate(e.target.value)}
                     className="royal-booking-input"
-                    min={todayStr}
+                    min={dateBounds.min}
+                    max={dateBounds.max}
                     required
                   />
                 </div>

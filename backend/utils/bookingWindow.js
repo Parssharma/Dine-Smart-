@@ -36,14 +36,14 @@ function validateBookingWindow(bookingDate, startTime, options = {}) {
   if (leadTime < MIN_LEAD_MS) {
     return { 
       valid: false, 
-      message: 'Bookings must be made at least 1 hour in advance.' 
+      message: 'Reservation time must be between 1 and 24 hours from now.' 
     };
   }
 
   if (leadTime > MAX_LEAD_MS) {
     return { 
       valid: false, 
-      message: 'Bookings can only be made up to 24 hours in advance.' 
+      message: 'Reservation time must be between 1 and 24 hours from now.' 
     };
   }
 
