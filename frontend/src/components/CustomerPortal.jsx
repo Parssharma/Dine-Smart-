@@ -6,6 +6,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { isValidPhoneNumber } from 'libphonenumber-js';
 import { API_BASE } from '../config/api';
+import { getDateBounds, validateBookingWindowFrontend } from '../utils/bookingWindow';
 
 function isObviouslyFakeNumber(digitsOnly) {
   const sequential = "0123456789";
@@ -27,13 +28,7 @@ function isObviouslyFakeNumber(digitsOnly) {
 export default function CustomerPortal() {
   const { user, isAuthenticated, login, register, getAuthHeaders } = useAuth();
   
-  const getLocalTodayStr = () => {
-    const now = new Date();
-    const offset = now.getTimezoneOffset();
-    const localNow = new Date(now.getTime() - (offset * 60 * 1000));
-    return localNow.toISOString().split('T')[0];
-  };
-  const todayStr = getLocalTodayStr();
+  const dateBounds = getDateBounds();
 
   // Tab View within customer portal: 'reserve' | 'my-bookings'
   const [activeCustomerTab, setActiveCustomerTab] = useState('reserve');
@@ -52,7 +47,7 @@ export default function CustomerPortal() {
   const [contact, setContact] = useState('');
   const [partySize, setPartySize] = useState('2');
   const [preference, setPreference] = useState('');
-  const [bookingDate, setBookingDate] = useState(todayStr);
+  const [bookingDate, setBookingDate] = useState(dateBounds.min);
   const [startTime, setStartTime] = useState('19:00');
   const [endTime, setEndTime] = useState('20:30');
   
@@ -216,6 +211,12 @@ export default function CustomerPortal() {
       setErrorMsg('End time must be later than start time.');
       return;
     }
+
+    const windowCheck = validateBookingWindowFrontend(bookingDate, startTime);
+    if (!windowCheck.valid) {
+      setErrorMsg('Bookings must be made between 1 and 24 hours in advance.');
+      return;
+    }
     
     setSearching(true);
     setHasSearched(false);
@@ -278,6 +279,12 @@ export default function CustomerPortal() {
 
     if (startTime >= endTime) {
       setErrorMsg('End time must be later than start time.');
+      return;
+    }
+
+    const windowCheck = validateBookingWindowFrontend(bookingDate, startTime);
+    if (!windowCheck.valid) {
+      setErrorMsg('Bookings must be made between 1 and 24 hours in advance.');
       return;
     }
 
@@ -653,6 +660,8 @@ export default function CustomerPortal() {
                     className="form-input" 
                     value={bookingDate} 
                     onChange={(e) => setBookingDate(e.target.value)}
+                    min={dateBounds.min}
+                    max={dateBounds.max}
                     required
                   />
                 </div>
@@ -693,7 +702,6 @@ export default function CustomerPortal() {
                     <Sparkles size={18} style={{ color: 'var(--accent-gold)' }} />
                     Smart Recommendations
                   </h3>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Powered by Smart Booking Engine</span>
                 </div>
 
                 {preference && !recommendations.some(r => r.location === preference) && (
@@ -751,12 +759,11 @@ export default function CustomerPortal() {
                     <Sparkles size={18} style={{ color: 'var(--accent-gold)' }} />
                     Smart Table Combination
                   </h3>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>C++ Backtracking Engine</span>
                 </div>
 
                 <div style={{ padding: '0.6rem 0.85rem', backgroundColor: 'rgba(217, 119, 6, 0.08)', border: '1px solid rgba(217, 119, 6, 0.25)', borderRadius: 'var(--radius-sm)', marginBottom: '0.75rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
                   {recommendations.length === 0 ? (
-                    <span>No single table can seat <strong>{partySize} guests</strong>. Our backtracking algorithm computed the optimal joined table combination:</span>
+                    <span>No single table can seat <strong>{partySize} guests</strong>. Our smart seating system computed the optimal joined table combination:</span>
                   ) : (
                     <span>For larger parties, you can also select this optimal combined seating:</span>
                   )}
