@@ -267,9 +267,11 @@ router.post('/send-otp', async (req, res) => {
 
     // 4. Send email FIRST before updating DB
     try {
+      console.log(`[OTP] Generated 6-digit OTP code for ${normalizedEmail}: ${otp}`);
       await sendOtpEmail(normalizedEmail, otp);
+      console.log(`[OTP] Verification email sent successfully to ${normalizedEmail}`);
     } catch (err) {
-      console.error("Failed to send OTP email:", err.message);
+      console.error(`[OTP] Failed to send OTP email to ${normalizedEmail}:`, err);
       return res.status(502).json({ 
         success: false, 
         message: "We couldn't send your code right now — please try again in a moment." 
